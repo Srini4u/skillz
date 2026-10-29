@@ -63,19 +63,65 @@ export interface SearchHit {
   snippet: string;
 }
 
-/** Anything the viewer can show: an asset, or a file from a load stack. */
+/** Anything the inspector can show: an asset, or a file from a load stack. */
 export interface OpenItem {
+  agentId: string;
   agentName: string;
   name: string;
   kind: AssetKind;
   path: string;
+  scope?: Scope;
+  enabled?: boolean;
   description?: string | null;
   details?: unknown;
   line?: number | null;
 }
 
 export function openAsset(agent: Agent, a: Asset, line?: number | null): OpenItem {
-  return { agentName: agent.name, name: a.name, kind: a.kind, path: a.path, description: a.description, details: a.details, line };
+  return { agentId: agent.id, agentName: agent.name, name: a.name, kind: a.kind, path: a.path, scope: a.scope, enabled: a.enabled, description: a.description, details: a.details, line };
+}
+
+export interface FileState {
+  content: string;
+  hash: string;
+  exists: boolean;
+}
+
+export interface DiffLine {
+  tag: "same" | "add" | "remove";
+  text: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  time: number;
+  action: "create" | "write" | "delete" | "rename" | "undo";
+  path: string;
+  to: string | null;
+  backup: string | null;
+  summary: string;
+  undone: boolean;
+}
+
+/** Kinds each agent can create, and whether they can live at user level and in a project. */
+export const CREATABLE: Record<string, { kind: AssetKind; user: boolean; project: boolean }[]> = {
+  "claude-code": [
+    { kind: "skill", user: true, project: true },
+    { kind: "instruction", user: true, project: true },
+    { kind: "memory", user: false, project: true },
+    { kind: "subagent", user: true, project: true },
+    { kind: "command", user: true, project: true },
+  ],
+  codex: [
+    { kind: "skill", user: true, project: true },
+    { kind: "instruction", user: true, project: true },
+    { kind: "command", user: true, project: false },
+  ],
+};
+
+/** The `project` argument for an MCP server stored per project inside ~/.claude.json. */
+export function mcpProject(item: OpenItem): string | null {
+  return item.path.endsWith("/.claude.json") && item.scope?.type === "project" ? item.scope.path : null;
 }
 
 export function fileName(path: string): string {
