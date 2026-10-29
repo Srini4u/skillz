@@ -131,11 +131,11 @@ fn create_asset(state: State<'_, AppState>, agent_id: String, kind: AssetKind, p
 }
 
 #[tauri::command]
-fn save_mcp(state: State<'_, AppState>, file: String, project: Option<String>, name: String, config: serde_json::Value, rename_from: Option<String>) -> Result<JournalEntry, String> {
+fn save_mcp(state: State<'_, AppState>, file: String, project: Option<String>, name: String, config: serde_json::Value, rename_from: Option<String>, opened: Option<serde_json::Value>) -> Result<JournalEntry, String> {
     let file = PathBuf::from(file);
     state.check(&ctx(), &file)?;
     let project = project.map(PathBuf::from);
-    ops::save_mcp_server(&store(), &file, project.as_deref(), &name, config, rename_from.as_deref()).map_err(err)
+    ops::save_mcp_server(&store(), &file, project.as_deref(), &name, config, rename_from.as_deref(), opened.as_ref()).map_err(err)
 }
 
 #[tauri::command]

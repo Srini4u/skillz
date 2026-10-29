@@ -3,7 +3,7 @@
 
 use crate::edit::{read_state, EditError, JournalEntry, Result, Store};
 use crate::model::AssetKind;
-use crate::util::MASK;
+use crate::util::{mask_secrets, MASK};
 use crate::ScanContext;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -65,7 +65,9 @@ pub fn create_asset(store: &Store, ctx: &ScanContext, agent_id: &str, kind: Asse
 /// `project` is set when the server lives under `projects.<path>` in `~/.claude.json`.
 /// Masked secret values in `config` are swapped back for the values already on disk.
 /// When `rename_from` is given, that server is removed in the same write.
-pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name: &str, config: Value, rename_from: Option<&str>) -> Result<JournalEntry> {
+/// `opened` is the server's masked config when the draft was opened, or `None` for a new
+/// server; if the server on disk no longer matches it, the save is refused as a conflict.
+pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name: &str, config: Value, rename_from: Option<&str>, opened: Option<&Value>) -> Result<JournalEntry> {
     let name = name.trim();
     if name.is_empty() {
         return Err(EditError::Invalid("an MCP server needs a name".into()));
@@ -84,6 +86,7 @@ pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name:
             return Err(taken());
         }
         let old = servers.get(rename_from.unwrap_or(name)).map(|i| toml_to_json(i)).unwrap_or(Value::Null);
+        unchanged_since(file, &old, opened)?;
         let merged = unmask(config, &old);
         if let Some(from) = rename_from {
             servers.remove(from);
@@ -97,6 +100,7 @@ pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name:
             return Err(taken());
         }
         let old = servers.get(rename_from.unwrap_or(name)).cloned().unwrap_or(Value::Null);
+        unchanged_since(file, &old, opened)?;
         let merged = unmask(config, &old);
         if let Some(from) = rename_from {
             servers.shift_remove(from);
@@ -105,6 +109,21 @@ pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name:
         pretty_json(&root)
     };
     store.write(file, &content, Some(&state.hash), &format!("Save MCP server {name}"))
+}
+
+/// Refuses the save when the server on disk is not the one the draft started from.
+fn unchanged_since(file: &Path, current: &Value, opened: Option<&Value>) -> Result<()> {
+    let mut masked = current.clone();
+    mask_secrets(&mut masked);
+    let same = match opened {
+        Some(v) => *v == masked,
+        None => current.is_null(),
+    };
+    if same {
+        Ok(())
+    } else {
+        Err(EditError::Conflict(file.to_path_buf()))
+    }
 }
 
 pub fn delete_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name: &str) -> Result<JournalEntry> {
@@ -290,7 +309,11 @@ mod tests {
         let file = tmp.path().join(".claude.json");
         fs::write(&file, r#"{"numStartups": 5, "mcpServers": {"github": {"command": "npx", "env": {"GITHUB_TOKEN": "real"}}}, "zLast": true}"#).unwrap();
         let edited = serde_json::json!({"command": "npx", "args": ["-y", "gh"], "env": {"GITHUB_TOKEN": MASK}});
-        save_mcp_server(&store, &file, None, "github", edited, None).unwrap();
+        let opened = serde_json::json!({"command": "npx", "env": {"GITHUB_TOKEN": MASK}});
+        let stale = serde_json::json!({"command": "old"});
+        assert!(matches!(save_mcp_server(&store, &file, None, "github", edited.clone(), None, Some(&stale)), Err(EditError::Conflict(_))), "changed since it was opened");
+        assert!(save_mcp_server(&store, &file, None, "github", edited.clone(), None, None).is_err(), "not new");
+        save_mcp_server(&store, &file, None, "github", edited, None, Some(&opened)).unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["github"]["env"]["GITHUB_TOKEN"], "real");
         assert_eq!(v["mcpServers"]["github"]["args"][1], "gh");
@@ -299,13 +322,13 @@ mod tests {
         assert_eq!(keys, ["numStartups", "mcpServers", "zLast"]);
 
         let project = Path::new("/work/repo");
-        save_mcp_server(&store, &file, Some(project), "db", serde_json::json!({"command": "pg"}), None).unwrap();
+        save_mcp_server(&store, &file, Some(project), "db", serde_json::json!({"command": "pg"}), None, None).unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(v["projects"]["/work/repo"]["mcpServers"]["db"]["command"], "pg");
 
         let before = fs::read_to_string(&file).unwrap();
-        save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "x"}), None).unwrap();
-        assert!(save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "y"}), Some("github")).is_err(), "rename onto an existing server");
+        save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "x"}), None, None).unwrap();
+        assert!(save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "y"}), Some("github"), None).is_err(), "rename onto an existing server");
         assert_ne!(before, fs::read_to_string(&file).unwrap());
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["linear"]["command"], "x");
@@ -321,7 +344,7 @@ mod tests {
         let (tmp, store, _) = setup();
         let file = tmp.path().join("config.toml");
         fs::write(&file, "# my settings\nmodel = \"gpt-5\"\n\n[mcp_servers.github]\ncommand = \"npx\"\nenv = { GITHUB_TOKEN = \"real\" }\n").unwrap();
-        save_mcp_server(&store, &file, None, "gh", serde_json::json!({"command": "npx", "args": ["gh"], "env": {"GITHUB_TOKEN": MASK}}), Some("github")).unwrap();
+        save_mcp_server(&store, &file, None, "gh", serde_json::json!({"command": "npx", "args": ["gh"], "env": {"GITHUB_TOKEN": MASK}}), Some("github"), Some(&serde_json::json!({"command": "npx", "env": {"GITHUB_TOKEN": MASK}}))).unwrap();
         let text = fs::read_to_string(&file).unwrap();
         assert!(text.starts_with("# my settings\nmodel = \"gpt-5\""));
         let t: toml::Table = text.parse().unwrap();

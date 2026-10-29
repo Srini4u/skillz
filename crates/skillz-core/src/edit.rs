@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum EditError {
     /// The file changed on disk since it was read.
     Conflict(PathBuf),
+    /// Undo refused: the file was changed again after the change being undone.
+    ChangedSince(PathBuf),
     /// The new content of a JSON or TOML file does not parse.
     Invalid(String),
     NotFound(PathBuf),
@@ -22,6 +24,7 @@ impl std::fmt::Display for EditError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Conflict(p) => write!(f, "{} changed on disk since you opened it. Reload it and try again.", p.display()),
+            Self::ChangedSince(p) => write!(f, "{} was changed again after this, so undoing it would throw that change away. Undo the later change first.", p.display()),
             Self::Invalid(e) => write!(f, "Not saved, the file would be invalid: {e}"),
             Self::NotFound(p) => write!(f, "{} does not exist", p.display()),
             Self::Io(e) => write!(f, "{e}"),
@@ -60,6 +63,10 @@ pub struct JournalEntry {
     pub backup: Option<PathBuf>,
     pub summary: String,
     pub undone: bool,
+    /// What `path` looked like right after the change (see `state_of`), so undo can tell
+    /// whether something else has changed it since.
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 /// Content plus a fingerprint to pass back on save, so a save never clobbers an outside change.
@@ -145,6 +152,7 @@ impl Store {
         let mut all = self.history();
         all.reverse();
         entry.id = format!("{}-{}", entry.time, all.len());
+        entry.after = state_of(&entry.path);
         all.push(entry.clone());
         atomic_write(&self.journal_path(), serde_json::to_string_pretty(&all).expect("journal serializes").as_bytes())?;
         Ok(entry)
@@ -162,7 +170,7 @@ impl Store {
     }
 
     fn entry(&self, action: Action, path: &Path, backup: Option<PathBuf>, time: u64, summary: String) -> JournalEntry {
-        JournalEntry { id: String::new(), time, action, path: path.to_path_buf(), to: None, backup, summary, undone: false }
+        JournalEntry { id: String::new(), time, action, path: path.to_path_buf(), to: None, backup, summary, undone: false, after: None }
     }
 
     /// Writes `content` to `path` if it still matches `expected_hash` (pass `None` to skip the
@@ -262,6 +270,11 @@ impl Store {
                 e
             }
             _ => {
+                // Undo restores the old version wholesale, so refuse if the file was edited
+                // after this change rather than silently throwing that edit away.
+                if target.after.is_some() && state_of(&target.path) != target.after {
+                    return Err(EditError::ChangedSince(target.path.clone()));
+                }
                 let backup = self.backup(&target.path, time, n)?;
                 remove_any(&target.path)?;
                 if let Some(b) = &target.backup {
@@ -273,6 +286,15 @@ impl Store {
         all[pos].undone = true;
         atomic_write(&self.journal_path(), serde_json::to_string_pretty(&all).expect("journal serializes").as_bytes())?;
         self.record(entry)
+    }
+}
+
+/// A file's fingerprint, "absent" when nothing is there, or `None` for a folder (not tracked).
+fn state_of(path: &Path) -> Option<String> {
+    match fs::metadata(path) {
+        Err(_) => Some("absent".into()),
+        Ok(m) if m.is_file() => fs::read(path).ok().map(|b| fingerprint(&b)),
+        Ok(_) => None,
     }
 }
 
@@ -344,6 +366,17 @@ mod tests {
         // Undo the undo.
         store.undo(&hist[0].id).unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+    }
+
+    #[test]
+    fn undo_refuses_after_an_outside_edit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("store"));
+        let file = tmp.path().join("AGENTS.md");
+        let e = store.write(&file, "mine", None, "create").unwrap();
+        fs::write(&file, "edited elsewhere").unwrap();
+        assert!(matches!(store.undo(&e.id), Err(EditError::ChangedSince(_))));
+        assert_eq!(fs::read_to_string(&file).unwrap(), "edited elsewhere");
     }
 
     #[test]
