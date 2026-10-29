@@ -3,7 +3,12 @@ name: CI
 on:
   push:
     branches: [main]
+    # Pushing a tag like v0.1.0 also publishes the bundles as a GitHub Release.
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -32,5 +37,13 @@ jobs:
         with:
           name: skillz-linux
           path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
             target/release/bundle/deb/*.deb
             target/release/bundle/appimage/*.AppImage
