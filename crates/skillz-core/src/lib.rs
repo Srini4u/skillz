@@ -5,10 +5,13 @@
 
 pub mod adapters;
 pub mod model;
+mod search;
 mod util;
 
-pub use model::{Agent, Asset, AssetKind, Scope};
-use std::path::PathBuf;
+pub use model::{Agent, Asset, AssetKind, LoadStack, LoadedFile, Scope, SearchHit};
+pub use search::search;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// Where to look. Tests point `home` and `system_root` at temp folders.
 #[derive(Debug, Clone)]
@@ -33,7 +36,10 @@ impl ScanContext {
 }
 
 pub trait Adapter {
+    fn id(&self) -> &'static str;
     fn scan(&self, ctx: &ScanContext) -> Agent;
+    /// The instruction and memory files the agent loads when started in `project`, in order.
+    fn load_order(&self, ctx: &ScanContext, project: &Path) -> Vec<LoadedFile>;
 }
 
 pub fn adapters() -> Vec<Box<dyn Adapter>> {
@@ -42,7 +48,57 @@ pub fn adapters() -> Vec<Box<dyn Adapter>> {
 
 /// Scans every supported agent.
 pub fn scan(ctx: &ScanContext) -> Vec<Agent> {
-    adapters().iter().map(|a| a.scan(ctx)).collect()
+    let mut agents: Vec<Agent> = adapters().iter().map(|a| a.scan(ctx)).collect();
+    for asset in agents.iter_mut().flat_map(|a| a.assets.iter_mut()) {
+        if asset.kind != AssetKind::McpServer {
+            asset.bytes = std::fs::metadata(&asset.path).ok().map(|m| m.len());
+        }
+    }
+    agents
+}
+
+/// What each agent loads when started in `project`.
+pub fn load_order(ctx: &ScanContext, project: &Path) -> Vec<LoadStack> {
+    adapters()
+        .iter()
+        .map(|a| LoadStack { agent_id: a.id().to_string(), files: a.load_order(ctx, project) })
+        .collect()
+}
+
+/// Folders to watch for changes: the agents' roots and every folder an asset was found in,
+/// plus the parent of each skill folder so new skills show up. Only existing folders.
+pub fn watch_dirs(agents: &[Agent]) -> BTreeSet<PathBuf> {
+    let mut dirs = BTreeSet::new();
+    for agent in agents {
+        for root in &agent.roots {
+            let dir = if root.is_dir() { Some(root.as_path()) } else { root.parent() };
+            dirs.extend(dir.map(Path::to_path_buf));
+        }
+        for asset in &agent.assets {
+            let parent = asset.path.parent();
+            dirs.extend(parent.map(Path::to_path_buf));
+            if asset.kind == AssetKind::Skill {
+                dirs.extend(parent.and_then(Path::parent).map(Path::to_path_buf));
+            }
+        }
+        for project in &agent.known_projects {
+            dirs.insert(project.clone());
+        }
+    }
+    dirs.retain(|d| d.is_dir());
+    dirs
+}
+
+/// `dir` and its ancestors from the top down, stopping below `/`.
+pub(crate) fn ancestors_top_down(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = dir.ancestors().filter(|p| p.parent().is_some()).map(Path::to_path_buf).collect();
+    v.reverse();
+    v
+}
+
+pub(crate) fn loaded(path: PathBuf, kind: AssetKind, scope: Scope, reason: &str) -> Option<LoadedFile> {
+    let bytes = std::fs::metadata(&path).ok().filter(|m| m.is_file())?.len();
+    Some(LoadedFile { path, kind, scope, bytes, reason: reason.to_string() })
 }
 
 /// Project folders to scan: the ones the caller asked for plus the ones the agent knows,

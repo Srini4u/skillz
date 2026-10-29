@@ -17,3 +17,4 @@ skillz-core = { path = "../crates/skillz-core" }
 tauri = { version = "2", features = [] }
 serde.workspace = true
 serde_json.workspace = true
+notify-debouncer-mini = "0.7.0"

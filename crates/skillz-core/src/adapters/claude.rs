@@ -2,7 +2,8 @@
 
 use crate::model::{Agent, Asset, AssetKind, Scope};
 use crate::util::{file_asset, markdown_in, mask_secrets, skills_in, version_of, which};
-use crate::{project_dirs, Adapter, ScanContext};
+use crate::model::LoadedFile;
+use crate::{ancestors_top_down, loaded, project_dirs, Adapter, ScanContext};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,30 @@ use std::path::{Path, PathBuf};
 pub struct ClaudeCode;
 
 impl Adapter for ClaudeCode {
+    fn id(&self) -> &'static str {
+        "claude-code"
+    }
+
+    /// User CLAUDE.md, then CLAUDE.md / .claude/CLAUDE.md / CLAUDE.local.md in every folder
+    /// from the top down to the project, then the project's auto memory index.
+    fn load_order(&self, ctx: &ScanContext, project: &Path) -> Vec<LoadedFile> {
+        let dir = ctx.home.join(".claude");
+        let mut out: Vec<LoadedFile> = Vec::new();
+        out.extend(loaded(dir.join("CLAUDE.md"), AssetKind::Instruction, Scope::User, "user instructions"));
+        for folder in ancestors_top_down(project) {
+            let scope = Scope::Project { path: project.to_path_buf() };
+            let reason = if folder == project { "project" } else { "parent folder" };
+            for file in [folder.join("CLAUDE.md"), folder.join(".claude").join("CLAUDE.md"), folder.join("CLAUDE.local.md")] {
+                if file != dir.join("CLAUDE.md") {
+                    out.extend(loaded(file, AssetKind::Instruction, scope.clone(), reason));
+                }
+            }
+        }
+        let memory = memory_dir(&dir, project).join("MEMORY.md");
+        out.extend(loaded(memory, AssetKind::Memory, Scope::Project { path: project.to_path_buf() }, "auto memory"));
+        out
+    }
+
     fn scan(&self, ctx: &ScanContext) -> Agent {
         let dir = ctx.home.join(".claude");
         let state_file = ctx.home.join(".claude.json");
@@ -64,12 +89,16 @@ impl Adapter for ClaudeCode {
             if let Some(servers) = state.as_ref().and_then(|s| s.pointer(&format!("/projects/{}/mcpServers", escape_pointer(&key)))) {
                 agent.assets.extend(mcp_servers(servers, &state_file, &scope));
             }
-            // Auto memory: ~/.claude/projects/<path with every non-alphanumeric char as '-'>/memory/*.md
-            let encoded: String = key.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
-            agent.assets.extend(markdown_in(&dir.join("projects").join(encoded).join("memory"), AssetKind::Memory, &scope, 1));
+            agent.assets.extend(markdown_in(&memory_dir(&dir, &project), AssetKind::Memory, &scope, 1));
         }
         agent
     }
+}
+
+/// Auto memory lives in ~/.claude/projects/<path with every non-alphanumeric char as '-'>/memory/.
+fn memory_dir(claude_dir: &Path, project: &Path) -> PathBuf {
+    let encoded: String = project.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    claude_dir.join("projects").join(encoded).join("memory")
 }
 
 fn mcp_servers(servers: &Value, file: &Path, scope: &Scope) -> Vec<Asset> {

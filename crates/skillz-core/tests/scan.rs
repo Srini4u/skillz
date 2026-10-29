@@ -109,3 +109,53 @@ fn broken_config_becomes_a_warning() {
         assert_eq!(agent.warnings.len(), 1, "{}", agent.name);
     }
 }
+
+#[test]
+fn load_order_follows_each_agents_rules() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let repo = tmp.path().join("work/repo");
+    let sub = repo.join("services/api");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    write(&home.join(".claude/CLAUDE.md"), "user");
+    write(&tmp.path().join("work/CLAUDE.md"), "parent");
+    write(&repo.join("CLAUDE.md"), "repo");
+    write(&sub.join("CLAUDE.local.md"), "local");
+    let encoded: String = sub.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    write(&home.join(".claude/projects").join(encoded).join("memory/MEMORY.md"), "mem");
+    write(&home.join(".codex/AGENTS.md"), "user");
+    write(&home.join(".codex/AGENTS.override.md"), "override wins");
+    write(&tmp.path().join("work/AGENTS.md"), "above git root, ignored");
+    write(&repo.join("AGENTS.md"), "repo");
+    write(&sub.join("AGENTS.md"), "sub");
+
+    let ctx = ScanContext { home: home.clone(), codex_home: None, system_root: tmp.path().into(), projects: vec![], probe_binaries: false };
+    let stacks = skillz_core::load_order(&ctx, &sub);
+    let rel = |id: &str| -> Vec<String> {
+        stacks.iter().find(|s| s.agent_id == id).unwrap().files.iter()
+            .map(|f| f.path.strip_prefix(tmp.path()).unwrap().to_string_lossy().to_string())
+            .collect()
+    };
+    let claude = rel("claude-code");
+    assert_eq!(claude[..4], ["home/.claude/CLAUDE.md", "work/CLAUDE.md", "work/repo/CLAUDE.md", "work/repo/services/api/CLAUDE.local.md"]);
+    assert!(claude[4].ends_with("memory/MEMORY.md"));
+    assert_eq!(rel("codex"), ["home/.codex/AGENTS.override.md", "work/repo/AGENTS.md", "work/repo/services/api/AGENTS.md"]);
+}
+
+#[test]
+fn search_matches_content_and_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let skill_text = "---\nname: deploy\n---\nRun the Terraform plan first.";
+    write(&tmp.path().join(".claude/skills/deploy/SKILL.md"), skill_text);
+    write(&tmp.path().join(".claude.json"), r#"{"mcpServers": {"postgres": {"command": "pg-mcp"}}}"#);
+    let ctx = ScanContext { home: tmp.path().into(), codex_home: None, system_root: tmp.path().into(), projects: vec![], probe_binaries: false };
+    let agents = scan(&ctx);
+    let hits = skillz_core::search(&agents, "terraform");
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].line, Some(4));
+    assert_eq!(hits[0].snippet, "Run the Terraform plan first.");
+    assert_eq!(skillz_core::search(&agents, "pg-mcp").len(), 1);
+    assert!(skillz_core::search(&agents, "  ").is_empty());
+    let skill = &agents[0].assets[hits[0].asset];
+    assert_eq!(skill.bytes, Some(skill_text.len() as u64));
+}

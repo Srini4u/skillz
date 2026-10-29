@@ -11,6 +11,7 @@ export interface Asset {
   path: string;
   description: string | null;
   enabled: boolean;
+  bytes: number | null;
   details?: unknown;
 }
 
@@ -39,6 +40,48 @@ export const KIND_LABELS: Record<AssetKind, string> = {
 export const KIND_ORDER = Object.keys(KIND_LABELS) as AssetKind[];
 
 export function scopeLabel(scope: Scope): string {
-  if (scope.type === "project") return scope.path.split("/").filter(Boolean).pop() ?? scope.path;
-  return scope.type;
+  return scope.type === "project" ? fileName(scope.path) : scope.type;
+}
+
+export interface LoadedFile {
+  path: string;
+  kind: AssetKind;
+  scope: Scope;
+  bytes: number;
+  reason: string;
+}
+
+export interface LoadStack {
+  agent_id: string;
+  files: LoadedFile[];
+}
+
+export interface SearchHit {
+  agent_id: string;
+  asset: number;
+  line: number | null;
+  snippet: string;
+}
+
+/** Anything the viewer can show: an asset, or a file from a load stack. */
+export interface OpenItem {
+  agentName: string;
+  name: string;
+  kind: AssetKind;
+  path: string;
+  description?: string | null;
+  details?: unknown;
+  line?: number | null;
+}
+
+export function openAsset(agent: Agent, a: Asset, line?: number | null): OpenItem {
+  return { agentName: agent.name, name: a.name, kind: a.kind, path: a.path, description: a.description, details: a.details, line };
+}
+
+export function fileName(path: string): string {
+  return path.split("/").filter(Boolean).pop() ?? path;
+}
+
+export function formatBytes(n: number): string {
+  return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
 }

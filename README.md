@@ -4,7 +4,14 @@ See and customize every AI coding agent on your machine (Claude Code, Codex CLI,
 
 Skillz reads and writes the agents' own files (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.agents`, and `CLAUDE.md` / `AGENTS.md` / `.mcp.json` in your repos). It keeps no hidden copy, needs no AI or API key, and works offline.
 
-**Status:** Phase 0. The app scans Claude Code and Codex CLI and shows what each has, read-only. Editing comes in Phase 2.
+**Status:** Phase 1. The app scans Claude Code and Codex CLI and shows what each has, read-only, in four views:
+
+- **Map:** each agent in the middle with its instructions, memory, skills, MCP servers, subagents, commands and settings around it, coloured by scope. Click a dot to open its file.
+- **List:** the same, grouped by kind.
+- **Coverage:** a heatmap of every skill, MCP server, subagent and command against each agent, so gaps stand out.
+- **Load order:** for a repo, the instruction and memory files each agent reads at startup, in order, with sizes.
+
+Search covers names, descriptions and file contents. The app watches the agents' folders and refreshes when a file changes. Editing comes in Phase 2.
 
 ## What it finds
 
@@ -37,6 +44,7 @@ npx tauri build          # .deb and AppImage in target/release/bundle/
 npm run scan                      # all agents, user scope + known projects
 npm run scan -- ~/code/my-repo    # also scan a specific repo
 npm run scan -- --json            # raw data the UI uses
+npm run scan -- --load-order ~/code/my-repo   # what each agent loads there
 ```
 
 ## Layout
@@ -47,8 +55,7 @@ npm run scan -- --json            # raw data the UI uses
 
 ## Plan
 
-1. Phase 0 (this): skeleton, Claude Code and Codex discovery, Ubuntu builds
-2. Phase 1: agent map, coverage and load-order views, search, file watching
+1. Phase 0 (done): skeleton, Claude Code and Codex discovery, Ubuntu builds
+2. Phase 1 (this): agent map, coverage and load-order views, search, file watching
 3. Phase 2: create, edit and delete skills, memory, instructions, MCP servers and settings, with diff, backup and undo
 4. Phase 3: capability matrix and copying skills and MCP servers between agents
-5. Phase 4: Gemini CLI, Cursor, Copilot, Windsurf and more
