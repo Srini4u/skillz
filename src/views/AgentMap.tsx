@@ -27,6 +27,7 @@ function group(key: string, label: string, kind: AssetKind, children: MapNode[])
 }
 
 const cut = (s: string) => short(s, 9);
+const leavesOf = (n: MapNode): MapNode[] => (n.children ? n.children.flatMap(leavesOf) : [n]);
 
 /** Keeps a ring at MAX_RING nodes or fewer by splitting it into alphabetical ranges. */
 function fit(nodes: MapNode[], kind: AssetKind, key: string): MapNode[] {
@@ -46,22 +47,34 @@ function kindChildren(kind: AssetKind, items: Asset[], base: string): MapNode[] 
   const leaves = items.map(leafNode);
   if (leaves.length <= MAX_RING) return leaves;
   const byFamily = BY_FAMILY.includes(kind);
+  // Keyed by the full scope so two projects with the same folder name stay apart.
+  const bucketKey = (a: Asset) => (byFamily ? `f:${family(a.name)}` : a.scope.type === "project" ? `p:${a.scope.path}` : `s:${a.scope.type}`);
   const buckets = new Map<string, MapNode[]>();
   for (const l of leaves) {
-    const k = byFamily ? family(l.label) : scopeLabel(l.asset!.scope);
+    const k = bucketKey(l.asset!);
     buckets.set(k, [...(buckets.get(k) ?? []), l]);
+  }
+  const labels = new Map<string, string>();
+  for (const [k, xs] of buckets) labels.set(k, byFamily ? `${k.slice(2)}-*` : scopeLabel(xs[0].asset!.scope));
+  const taken = [...labels.values()];
+  for (const [k, xs] of buckets) {
+    const scope = xs[0].asset!.scope;
+    if (!byFamily && scope.type === "project" && taken.filter((t) => t === labels.get(k)).length > 1) {
+      labels.set(k, scope.path.split(/[\\/]/).filter(Boolean).slice(-2).join("/"));
+    }
   }
   const groups: MapNode[] = [];
   const other: MapNode[] = [];
   for (const [k, xs] of buckets) {
     // A family of one or two is noise; those go together under "other".
     if (byFamily && xs.length < 3) other.push(...xs);
-    else groups.push(group(`${base}|${k}`, byFamily ? `${k}-*` : k, kind, fit(xs, kind, `${base}|${k}`)));
+    else groups.push(group(`${base}|${k}`, labels.get(k)!, kind, fit(xs, kind, `${base}|${k}`)));
   }
   groups.sort((a, b) => b.count - a.count);
   // Too many groups for one ring: the smallest ones join "other" so the big ones keep their names.
-  while (groups.length + (other.length ? 1 : 0) > MAX_RING) other.push(...groups.pop()!.children!.flatMap((c) => c.children ?? [c]));
-  if (other.length) groups.push(group(`${base}|other`, "other", kind, fit(other, kind, `${base}|other`)));
+  while (groups.length + (other.length ? 1 : 0) > MAX_RING) other.push(...leavesOf(groups.pop()!));
+  // The catch-all's key can't clash with a bucket key, which always has a prefix.
+  if (other.length) groups.push(group(`${base}|*other`, "other", kind, fit(other, kind, `${base}|*other`)));
   return groups;
 }
 
