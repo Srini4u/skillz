@@ -4,7 +4,7 @@ See and customize every AI coding agent on your machine (Claude Code, Codex CLI,
 
 Skillz reads and writes the agents' own files (`~/.claude`, `~/.claude.json`, `~/.codex`, `~/.agents`, and `CLAUDE.md` / `AGENTS.md` / `.mcp.json` in your repos). It keeps no hidden copy, needs no AI or API key, and works offline.
 
-**Status:** Phase 2. The app scans Claude Code and Codex CLI, shows what each has, and lets you change it.
+**Status:** Phase 3. The app scans Claude Code and Codex CLI, shows what each has, lets you change it, and helps you bring both up to the same level.
 
 Views:
 
@@ -13,6 +13,7 @@ Views:
 - **Coverage:** a heatmap of every skill, MCP server, subagent and command against each agent, so gaps stand out.
 - **Load order:** for a repo, the instruction and memory files each agent reads at startup, in order, with sizes.
 
+- **Health:** a score and checklist per agent (instructions everywhere, skills described, MCP commands installed, nothing the other agent has that this one lacks, and more), with a one-click fix where one is safe.
 - **History:** every change Skillz made, with Undo.
 
 Search covers names, descriptions and file contents. The app watches the agents' folders and refreshes when a file changes.
@@ -25,6 +26,12 @@ Open anything and press **Edit**. You always see a diff before anything is writt
 - **MCP servers** are edited as their JSON config and written back in the agent's own format: `~/.claude.json` / `.mcp.json` for Claude Code, `[mcp_servers.*]` in `~/.codex/config.toml` for Codex (comments and layout kept). Secrets stay masked; a masked value is kept as it is on disk.
 - **New:** skills, instruction files, Claude Code memory files, subagents, commands and MCP servers, at user level or in a project, from a starter template.
 - **Rename** a skill (folder and `name:`), **turn off** a Codex skill or MCP server without deleting it, **delete** anything (a skill goes with its whole folder).
+
+## Making agents well rounded
+
+- **Copy between agents:** in Coverage, a missing cell has a *Copy from …* button. Skills are copied with their whole folder; Claude Code commands become Codex prompts and back; MCP servers are translated between `~/.claude.json` / `.mcp.json` and `config.toml` (stdio and HTTP, with the real secret values, never the masked ones). Nothing is overwritten.
+- **Project scaffolding:** in Load order, an agent with no instructions for a repo gets *Create AGENTS.md from Claude Code's CLAUDE.md* (or the reverse), or a blank one.
+- **Health fixes** reuse the same copies and templates.
 
 Every write is checked against the version you opened (so it never overwrites a change made outside the app), backed up to `~/.local/share/skillz/backups/`, written atomically, and logged in `~/.local/share/skillz/journal.json`. Undo puts the old version back, and an undo can itself be undone. Skillz only writes inside `~/.claude`, `~/.claude.json`, `~/.codex`, `~/.agents` and your project folders.
 
@@ -72,5 +79,5 @@ npm run scan -- --load-order ~/code/my-repo   # what each agent loads there
 
 1. Phase 0 (done): skeleton, Claude Code and Codex discovery, Ubuntu builds
 2. Phase 1 (done): agent map, coverage and load-order views, search, file watching
-3. Phase 2 (this): create, edit and delete skills, memory, instructions, MCP servers and settings, with diff, backup and undo
-4. Phase 3: capability matrix and copying skills and MCP servers between agents
+3. Phase 2 (done): create, edit and delete skills, memory, instructions, MCP servers and settings, with diff, backup and undo
+4. Phase 3 (this): capability matrix and copying skills and MCP servers between agents

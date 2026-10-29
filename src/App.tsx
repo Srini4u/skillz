@@ -3,6 +3,7 @@ import { inApp, onAgentsChanged, saveProjects, savedProjects, scanAgents, search
 import Inspector from "./components/Inspector";
 import NewAsset from "./components/NewAsset";
 import History from "./views/History";
+import HealthView from "./views/HealthView";
 import AgentMap from "./views/AgentMap";
 import Coverage from "./views/Coverage";
 import LoadOrder from "./views/LoadOrder";
@@ -10,12 +11,13 @@ import Overview from "./views/Overview";
 import SearchResults from "./views/SearchResults";
 import { Agent, JournalEntry, KIND_LABELS, KIND_ORDER, OpenItem, SearchHit, openAsset } from "./types";
 
-type Tab = "overview" | "map" | "coverage" | "load" | "history";
+type Tab = "overview" | "map" | "coverage" | "load" | "health" | "history";
 const TABS: { id: Tab; label: string }[] = [
   { id: "map", label: "Map" },
   { id: "overview", label: "List" },
   { id: "coverage", label: "Coverage" },
   { id: "load", label: "Load order" },
+  { id: "health", label: "Health" },
   { id: "history", label: "History" },
 ];
 
@@ -194,14 +196,16 @@ export default function App() {
                 <Overview agent={agent} open={open} onOpen={setOpen} />
               </>
             )
+          ) : tab === "health" ? (
+            <HealthView agents={agents} version={version} onOpen={setOpen} onChanged={changed} onCoverage={() => setTab("coverage")} />
           ) : tab === "history" ? (
             <History version={version} onChanged={changed} />
           ) : tab === "coverage" ? (
-            <Coverage agents={agents} onOpen={setOpen} />
+            <Coverage agents={agents} onOpen={setOpen} onChanged={changed} />
           ) : (
             <>
               <AddProject onAdd={addProject} />
-              <LoadOrder agents={agents} projects={projects} onOpen={setOpen} />
+              <LoadOrder agents={agents} projects={projects} onOpen={setOpen} onChanged={changed} />
             </>
           )}
         </div>

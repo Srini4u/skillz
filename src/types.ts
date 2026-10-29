@@ -131,3 +131,39 @@ export function fileName(path: string): string {
 export function formatBytes(n: number): string {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
 }
+
+export interface CopyRequest {
+  fromAgent: string;
+  kind: AssetKind;
+  name: string;
+  path: string;
+  project: string | null;
+  toAgent: string;
+  toProject: string | null;
+}
+
+export type Fix =
+  | { type: "create"; agent_id: string; kind: AssetKind; project: string | null }
+  | { type: "copy"; request: CopyRequest }
+  | { type: "open"; path: string }
+  | { type: "coverage" };
+
+export interface Check {
+  id: string;
+  ok: boolean;
+  severity: "warn" | "info";
+  title: string;
+  detail: string;
+  fix: Fix | null;
+}
+
+export interface Health {
+  agent_id: string;
+  score: number;
+  checks: Check[];
+}
+
+/** Kinds that can be copied from one agent to another. */
+export const COPYABLE: AssetKind[] = ["skill", "mcp_server", "command", "subagent", "instruction"];
+
+export const agentLabel = (id: string) => (id === "claude-code" ? "Claude Code" : id === "codex" ? "Codex" : id);

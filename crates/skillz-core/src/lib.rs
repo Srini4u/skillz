@@ -5,8 +5,10 @@
 
 pub mod adapters;
 pub mod edit;
+pub mod health;
 pub mod model;
 pub mod ops;
+pub mod sync;
 mod search;
 mod util;
 
