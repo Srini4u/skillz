@@ -4,9 +4,13 @@
 //! into the common [`model`]. The agents' own files stay the source of truth.
 
 pub mod adapters;
+pub mod edit;
 pub mod model;
+pub mod ops;
 mod search;
 mod util;
+
+pub use util::MASK;
 
 pub use model::{Agent, Asset, AssetKind, LoadStack, LoadedFile, Scope, SearchHit};
 pub use search::search;

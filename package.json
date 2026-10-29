@@ -10,7 +10,12 @@
     "scan": "cargo run -q -p skillz-core --bin skillz-scan --"
   },
   "dependencies": {
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/legacy-modes": "^6.5.5",
     "@tauri-apps/api": "^2.12.4",
+    "@uiw/react-codemirror": "^4.25.12",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

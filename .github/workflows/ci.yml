@@ -21,10 +21,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Core tests
-        run: cargo test -p skillz-core
+      # The app crate embeds dist/ at compile time, so build the frontend first.
       - name: Frontend type check and build
         run: npm run build
+      - name: Rust tests
+        run: cargo test --workspace
       - name: Bundle .deb and AppImage
         run: npx tauri build
       - uses: actions/upload-artifact@v4

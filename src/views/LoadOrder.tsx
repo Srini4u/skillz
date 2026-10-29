@@ -48,7 +48,7 @@ export default function LoadOrder({ agents, projects, onOpen }: { agents: Agent[
                     <button
                       className="layer"
                       title={f.path}
-                      onClick={() => onOpen({ agentName: agent?.name ?? s.agent_id, name: fileName(f.path), kind: f.kind, path: f.path })}
+                      onClick={() => onOpen({ agentId: s.agent_id, agentName: agent?.name ?? s.agent_id, scope: f.scope, name: fileName(f.path), kind: f.kind, path: f.path })}
                     >
                       <span className="bar" style={{ width: `${Math.max(4, (f.bytes / max) * 100)}%` }} />
                       <span className="layer-text">
