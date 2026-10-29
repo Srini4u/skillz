@@ -289,13 +289,29 @@ impl Store {
     }
 }
 
-/// A file's fingerprint, "absent" when nothing is there, or `None` for a folder (not tracked).
+/// A fingerprint of a file or a whole folder (every name and byte inside it), "absent" when
+/// nothing is there, or `None` when it can't be read.
 fn state_of(path: &Path) -> Option<String> {
-    match fs::metadata(path) {
-        Err(_) => Some("absent".into()),
-        Ok(m) if m.is_file() => fs::read(path).ok().map(|b| fingerprint(&b)),
-        Ok(_) => None,
+    if !path.exists() {
+        return Some("absent".into());
     }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    hash_tree(path, Path::new(""), &mut h).ok()?;
+    Some(format!("{:016x}", h.finish()))
+}
+
+fn hash_tree(path: &Path, rel: &Path, h: &mut impl Hasher) -> io::Result<()> {
+    if path.is_dir() {
+        let mut names: Vec<_> = fs::read_dir(path)?.map(|e| e.map(|e| e.file_name())).collect::<io::Result<_>>()?;
+        names.sort();
+        for name in names {
+            hash_tree(&path.join(&name), &rel.join(&name), h)?;
+        }
+    } else {
+        rel.hash(h);
+        fs::read(path)?.hash(h);
+    }
+    Ok(())
 }
 
 fn now() -> u64 {
@@ -437,6 +453,10 @@ mod tests {
         let e = store.copy_in(&src, &dest, "copy").unwrap();
         assert_eq!(fs::read_to_string(dest.join("scripts/x.sh")).unwrap(), "x");
         assert!(store.copy_in(&src, &dest, "again").is_err());
+        let e2 = store.copy_in(&src, &tmp.path().join("c/pdf"), "copy").unwrap();
+        fs::write(tmp.path().join("c/pdf/scripts/new.sh"), "added later").unwrap();
+        assert!(matches!(store.undo(&e2.id), Err(EditError::ChangedSince(_))), "a file added to the folder since");
+        assert!(tmp.path().join("c/pdf/scripts/new.sh").exists());
         store.undo(&e.id).unwrap();
         assert!(!dest.exists() && src.exists());
     }
