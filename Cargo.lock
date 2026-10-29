@@ -2911,7 +2911,7 @@ checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
 
 [[package]]
 name = "skillz"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "notify-debouncer-mini",
  "serde",
@@ -2924,7 +2924,7 @@ dependencies = [
 
 [[package]]
 name = "skillz-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
