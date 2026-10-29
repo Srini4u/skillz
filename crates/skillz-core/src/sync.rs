@@ -35,25 +35,32 @@ pub fn default_target(ctx: &ScanContext, to_agent: &str, kind: AssetKind, projec
     in_project.then(|| project.to_path_buf())
 }
 
+/// The file or folder a copy writes: a skill's folder, the new file, or the MCP config file.
+pub fn destination(ctx: &ScanContext, req: &CopyRequest) -> Result<PathBuf> {
+    let target = |name: &str| new_asset_path(ctx, &req.to_agent, req.kind, req.to_project.as_deref(), name);
+    match req.kind {
+        AssetKind::Skill => target(&req.name).map(|p| p.parent().map(Path::to_path_buf).unwrap_or(p)),
+        // A slash command maps to a Codex prompt and back; nested names (git:ship) flatten.
+        AssetKind::Command | AssetKind::Subagent => target(&req.name.replace(':', "-")),
+        AssetKind::Instruction | AssetKind::Memory => target(&req.name),
+        AssetKind::McpServer => mcp_file(ctx, &req.to_agent, req.to_project.as_deref()),
+        AssetKind::Settings => Err(EditError::Invalid("settings differ too much between agents to copy".into())),
+    }
+}
+
 pub fn copy_asset(store: &Store, ctx: &ScanContext, req: &CopyRequest) -> Result<JournalEntry> {
     if req.from_agent == req.to_agent && req.project == req.to_project {
         return Err(EditError::Invalid("source and target are the same".into()));
     }
-    let target = |name: &str| new_asset_path(ctx, &req.to_agent, req.kind, req.to_project.as_deref(), name);
+    let dest = destination(ctx, req)?;
     let summary = format!("Copy {} {} to {}", label(req.kind), req.name, agent_name(&req.to_agent));
     match req.kind {
         AssetKind::Skill => {
             let src = req.path.parent().ok_or_else(|| EditError::NotFound(req.path.clone()))?;
-            let dest = target(&req.name)?;
-            store.copy_in(src, dest.parent().unwrap_or(&dest), &summary)
+            store.copy_in(src, &dest, &summary)
         }
-        AssetKind::Command | AssetKind::Subagent => {
-            // A slash command maps to a Codex prompt and back; nested names (git:ship) flatten.
-            let dest = target(&req.name.replace(':', "-"))?;
-            store.copy_in(&req.path, &dest, &summary)
-        }
+        AssetKind::Command | AssetKind::Subagent => store.copy_in(&req.path, &dest, &summary),
         AssetKind::Instruction | AssetKind::Memory => {
-            let dest = target(&req.name)?;
             if dest.exists() {
                 return Err(exists(&dest));
             }
@@ -62,8 +69,8 @@ pub fn copy_asset(store: &Store, ctx: &ScanContext, req: &CopyRequest) -> Result
         }
         AssetKind::McpServer => {
             let config = read_server(&req.path, req.project.as_deref(), &req.name)?;
-            let translated = translate_server(&config, &req.from_agent, &req.to_agent);
-            let file = mcp_file(ctx, &req.to_agent, req.to_project.as_deref())?;
+            let translated = translate_server(&config, &req.from_agent, &req.to_agent)?;
+            let file = dest;
             if read_server(&file, json_project(&file, req.to_project.as_deref()), &req.name).is_ok() {
                 return Err(EditError::Invalid(format!("{} already has an MCP server named {}", agent_name(&req.to_agent), req.name)));
             }
@@ -71,7 +78,7 @@ pub fn copy_asset(store: &Store, ctx: &ScanContext, req: &CopyRequest) -> Result
             e.summary = summary;
             Ok(e)
         }
-        AssetKind::Settings => Err(EditError::Invalid("settings differ too much between agents to copy".into())),
+        AssetKind::Settings => unreachable!("destination refuses settings"),
     }
 }
 
@@ -111,20 +118,25 @@ pub fn read_server(file: &Path, project: Option<&Path>, name: &str) -> Result<Va
 }
 
 /// Claude Code and Codex describe servers with mostly the same fields. Only the fields both
-/// understand are carried over, so the target never sees a key it would reject.
-pub fn translate_server(config: &Value, from: &str, to: &str) -> Value {
+/// understand are carried over, so the target never sees a key it would reject. Header
+/// secrets taken from environment variables stay in environment variables, and a server
+/// that is switched off stays off.
+pub fn translate_server(config: &Value, from: &str, to: &str) -> Result<Value> {
     let get = |k: &str| config.get(k).cloned();
     let mut out = Map::new();
-    let url = get("url");
-    let headers = if from == "codex" { get("http_headers") } else { get("headers") };
-    if let Some(url) = url {
+    if let Some(url) = get("url") {
+        let sse = from != "codex" && get("type").is_some_and(|t| t == "sse");
         if to == "claude-code" {
-            let kind = get("type").filter(|t| t == "sse").unwrap_or_else(|| Value::String("http".into()));
-            out.insert("type".into(), kind);
+            out.insert("type".into(), Value::String(if sse { "sse" } else { "http" }.into()));
+        } else if sse {
+            return Err(EditError::Invalid("Codex only connects to MCP servers over streamable HTTP, not SSE".into()));
         }
         out.insert("url".into(), url);
-        if let Some(h) = headers {
-            out.insert(if to == "codex" { "http_headers" } else { "headers" }.into(), h);
+        let headers = if from == "codex" { codex_headers(config) } else { get("headers").and_then(|h| h.as_object().cloned()).unwrap_or_default() };
+        if to == "codex" {
+            codex_from_headers(headers, &mut out);
+        } else if !headers.is_empty() {
+            out.insert("headers".into(), Value::Object(headers));
         }
     } else {
         for k in ["command", "args", "env", "cwd"] {
@@ -133,7 +145,54 @@ pub fn translate_server(config: &Value, from: &str, to: &str) -> Value {
             }
         }
     }
-    Value::Object(out)
+    let off = if from == "codex" { get("enabled") == Some(Value::Bool(false)) } else { get("disabled") == Some(Value::Bool(true)) };
+    if off {
+        let (k, v) = if to == "codex" { ("enabled", false) } else { ("disabled", true) };
+        out.insert(k.into(), Value::Bool(v));
+    }
+    Ok(Value::Object(out))
+}
+
+/// A Codex server's headers in Claude Code's form, where `${VAR}` is read from the environment.
+fn codex_headers(config: &Value) -> Map<String, Value> {
+    let mut headers = config.get("http_headers").and_then(|h| h.as_object().cloned()).unwrap_or_default();
+    if let Some(env) = config.get("env_http_headers").and_then(Value::as_object) {
+        for (k, var) in env {
+            if let Some(var) = var.as_str() {
+                headers.insert(k.clone(), Value::String(format!("${{{var}}}")));
+            }
+        }
+    }
+    if let Some(var) = config.get("bearer_token_env_var").and_then(Value::as_str) {
+        headers.insert("Authorization".into(), Value::String(format!("Bearer ${{{var}}}")));
+    }
+    headers
+}
+
+/// The reverse: headers that only name an environment variable go to Codex's env fields.
+fn codex_from_headers(headers: Map<String, Value>, out: &mut Map<String, Value>) {
+    let (mut plain, mut env) = (Map::new(), Map::new());
+    for (k, v) in headers {
+        let text = v.as_str().unwrap_or_default();
+        if let Some(var) = text.strip_prefix("Bearer ").and_then(env_var).filter(|_| k.eq_ignore_ascii_case("authorization")) {
+            out.insert("bearer_token_env_var".into(), Value::String(var.into()));
+        } else if let Some(var) = env_var(text) {
+            env.insert(k, Value::String(var.into()));
+        } else {
+            plain.insert(k, v);
+        }
+    }
+    if !plain.is_empty() {
+        out.insert("http_headers".into(), Value::Object(plain));
+    }
+    if !env.is_empty() {
+        out.insert("env_http_headers".into(), Value::Object(env));
+    }
+}
+
+/// `VAR` when `s` is exactly `${VAR}`.
+fn env_var(s: &str) -> Option<&str> {
+    s.strip_prefix("${")?.strip_suffix('}').filter(|v| !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
 }
 
 fn exists(p: &Path) -> EditError {
@@ -209,6 +268,17 @@ mod tests {
         let v: Value = serde_json::from_str(&fs::read_to_string(repo.join(".mcp.json")).unwrap()).unwrap();
         assert_eq!(v["mcpServers"]["docs"], serde_json::json!({"type": "http", "url": "https://x/mcp", "headers": {"Authorization": "Bearer t"}}));
         assert!(copy_asset(&store, &ctx, &req("claude-code", AssetKind::McpServer, "github", claude, None, "codex", None)).is_err(), "already there");
+    }
+
+    #[test]
+    fn keeps_env_secrets_and_off_switch_and_refuses_sse() {
+        let codex = serde_json::json!({"url": "https://x/mcp", "bearer_token_env_var": "TOKEN", "env_http_headers": {"X-Org": "ORG"}, "http_headers": {"X-A": "1"}, "enabled": false});
+        let claude = translate_server(&codex, "codex", "claude-code").unwrap();
+        assert_eq!(claude, serde_json::json!({"type": "http", "url": "https://x/mcp", "headers": {"X-A": "1", "X-Org": "${ORG}", "Authorization": "Bearer ${TOKEN}"}, "disabled": true}));
+        assert_eq!(translate_server(&claude, "claude-code", "codex").unwrap(), codex);
+        let sse = serde_json::json!({"type": "sse", "url": "https://x/sse"});
+        assert!(translate_server(&sse, "claude-code", "codex").is_err());
+        assert_eq!(translate_server(&sse, "claude-code", "claude-code").unwrap()["type"], "sse");
     }
 
     #[test]

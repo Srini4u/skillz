@@ -174,9 +174,7 @@ fn rename_skill(state: State<'_, AppState>, path: String, new_name: String) -> R
 #[tauri::command]
 fn copy_asset(state: State<'_, AppState>, request: CopyRequest) -> Result<JournalEntry, String> {
     let ctx = ctx();
-    if let Some(p) = &request.to_project {
-        state.check(&ctx, &p.join("CLAUDE.md"))?;
-    }
+    state.check(&ctx, &sync::destination(&ctx, &request).map_err(err)?)?;
     sync::copy_asset(&store(), &ctx, &request).map_err(err)
 }
 
@@ -294,6 +292,11 @@ mod tests {
         std::os::unix::fs::symlink(&outside, home.join("code/repo/link")).unwrap();
         assert!(state.check(&ctx, &home.join("code/repo/link/new/SKILL.md")).is_err());
         assert!(state.check(&ctx, &home.join("code/repo/real/new.md")).is_ok());
+        // A copy is checked where it will actually land, e.g. a symlinked skills folder.
+        std::fs::create_dir_all(home.join("code/repo/.agents")).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("code/repo/.agents/skills")).unwrap();
+        let req = CopyRequest { from_agent: "claude-code".into(), kind: AssetKind::Skill, name: "pdf".into(), path: home.join(".claude/skills/pdf/SKILL.md"), project: None, to_agent: "codex".into(), to_project: Some(home.join("code/repo")) };
+        assert!(state.check(&ctx, &sync::destination(&ctx, &req).unwrap()).is_err());
     }
 
     /// Calls commands the way the UI does (camelCase JSON args) against a temp home.
