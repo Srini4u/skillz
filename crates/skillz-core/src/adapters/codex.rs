@@ -2,15 +2,33 @@
 
 use crate::model::{Agent, Asset, AssetKind, Scope};
 use crate::util::{file_asset, markdown_in, mask_secrets, skills_in, version_of, which};
-use crate::{project_dirs, Adapter, ScanContext};
+use crate::model::LoadedFile;
+use crate::{ancestors_top_down, loaded, project_dirs, Adapter, ScanContext};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct Codex;
 
 impl Adapter for Codex {
+    fn id(&self) -> &'static str {
+        "codex"
+    }
+
+    /// The global AGENTS.md, then one file per folder from the git root down to the project.
+    /// In each place AGENTS.override.md wins over AGENTS.md.
+    fn load_order(&self, ctx: &ScanContext, project: &Path) -> Vec<LoadedFile> {
+        let mut out: Vec<LoadedFile> = Vec::new();
+        out.extend(pick(&codex_dir(ctx), Scope::User, "user instructions"));
+        let root = project.ancestors().find(|p| p.join(".git").exists()).unwrap_or(project);
+        for folder in ancestors_top_down(project).into_iter().filter(|f| f.starts_with(root)) {
+            let reason = if folder == project { "project" } else { "parent folder" };
+            out.extend(pick(&folder, Scope::Project { path: project.to_path_buf() }, reason));
+        }
+        out
+    }
+
     fn scan(&self, ctx: &ScanContext) -> Agent {
-        let dir = ctx.codex_home.clone().unwrap_or_else(|| ctx.home.join(".codex"));
+        let dir = codex_dir(ctx);
         let config_file = dir.join("config.toml");
         let user_skills = ctx.home.join(".agents").join("skills");
         let system_skills = ctx.system_root.join("etc").join("codex").join("skills");
@@ -74,6 +92,15 @@ impl Adapter for Codex {
         }
         agent
     }
+}
+
+fn codex_dir(ctx: &ScanContext) -> PathBuf {
+    ctx.codex_home.clone().unwrap_or_else(|| ctx.home.join(".codex"))
+}
+
+fn pick(folder: &Path, scope: Scope, reason: &str) -> Option<LoadedFile> {
+    loaded(folder.join("AGENTS.override.md"), AssetKind::Instruction, scope.clone(), reason)
+        .or_else(|| loaded(folder.join("AGENTS.md"), AssetKind::Instruction, scope, reason))
 }
 
 /// Paths listed as `[[skills.config]] path = "…" enabled = false`.

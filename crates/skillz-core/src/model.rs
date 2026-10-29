@@ -32,6 +32,8 @@ pub struct Asset {
     pub path: PathBuf,
     pub description: Option<String>,
     pub enabled: bool,
+    /// Size of the file on disk; not set for MCP servers, which share a config file.
+    pub bytes: Option<u64>,
     /// Kind-specific fields, e.g. an MCP server's command and (masked) env.
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     pub details: serde_json::Value,
@@ -46,6 +48,7 @@ impl Asset {
             path,
             description: None,
             enabled: true,
+            bytes: None,
             details: serde_json::Value::Null,
         }
     }
@@ -65,4 +68,31 @@ pub struct Agent {
     pub known_projects: Vec<PathBuf>,
     /// Files that exist but could not be parsed.
     pub warnings: Vec<String>,
+}
+
+/// One file an agent loads into context when it starts in a project, in load order.
+#[derive(Debug, Clone, Serialize)]
+pub struct LoadedFile {
+    pub path: PathBuf,
+    pub kind: AssetKind,
+    pub scope: Scope,
+    pub bytes: u64,
+    /// Why it is in the stack, e.g. "user instructions" or "parent folder".
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LoadStack {
+    pub agent_id: String,
+    pub files: Vec<LoadedFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchHit {
+    pub agent_id: String,
+    /// Index into that agent's `assets`.
+    pub asset: usize,
+    /// 1-based line of the first match in the file, or `None` when only the name matched.
+    pub line: Option<usize>,
+    pub snippet: String,
 }

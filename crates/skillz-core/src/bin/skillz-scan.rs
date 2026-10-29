@@ -1,22 +1,43 @@
 //! Prints what Skillz finds on this machine, to check every path before the app relies on it.
 //!
 //!     skillz-scan [--json] [PROJECT_DIR...]
+//!     skillz-scan [--json] --load-order PROJECT_DIR
 
-use skillz_core::{scan, AssetKind, ScanContext, Scope};
+use skillz_core::{load_order, scan, AssetKind, ScanContext, Scope};
 use std::path::PathBuf;
 
 fn main() {
     let mut json = false;
+    let mut order = false;
     let mut projects = Vec::new();
     for arg in std::env::args().skip(1) {
         match arg.as_str() {
             "--json" => json = true,
+            "--load-order" => order = true,
             "-h" | "--help" => {
-                println!("usage: skillz-scan [--json] [PROJECT_DIR...]");
+                println!("usage: skillz-scan [--json] [PROJECT_DIR...]\n       skillz-scan [--json] --load-order PROJECT_DIR");
                 return;
             }
             p => projects.push(PathBuf::from(p).canonicalize().unwrap_or_else(|_| PathBuf::from(p))),
         }
+    }
+    if order {
+        let Some(project) = projects.first() else {
+            eprintln!("--load-order needs a project folder");
+            std::process::exit(2);
+        };
+        let stacks = load_order(&ScanContext::from_env(Vec::new()), project);
+        if json {
+            println!("{}", serde_json::to_string_pretty(&stacks).expect("stacks serialize"));
+        } else {
+            for s in stacks {
+                println!("{}", s.agent_id);
+                for (i, f) in s.files.iter().enumerate() {
+                    println!("  {}. {} ({} bytes, {})", i + 1, f.path.display(), f.bytes, f.reason);
+                }
+            }
+        }
+        return;
     }
     let agents = scan(&ScanContext::from_env(projects));
     if json {
