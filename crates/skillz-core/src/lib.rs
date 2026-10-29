@@ -65,14 +65,21 @@ pub fn load_order(ctx: &ScanContext, project: &Path) -> Vec<LoadStack> {
         .collect()
 }
 
-/// Folders to watch for changes: the agents' roots and every folder an asset was found in,
-/// plus the parent of each skill folder so new skills show up. Only existing folders.
+/// Folders to watch for changes: the agents' roots and the folders directly inside them,
+/// every folder an asset was found in, the parent of each skill folder, and the conventional
+/// folders inside each project. Watches are not recursive, so a folder that starts empty
+/// (say `~/.claude/commands`) must be listed itself for its first file to be noticed.
+/// Only existing folders.
 pub fn watch_dirs(agents: &[Agent]) -> BTreeSet<PathBuf> {
     let mut dirs = BTreeSet::new();
     for agent in agents {
         for root in &agent.roots {
-            let dir = if root.is_dir() { Some(root.as_path()) } else { root.parent() };
-            dirs.extend(dir.map(Path::to_path_buf));
+            if root.is_dir() {
+                dirs.insert(root.clone());
+                dirs.extend(util::sorted_entries(root).into_iter().filter(|p| p.is_dir()));
+            } else {
+                dirs.extend(root.parent().map(Path::to_path_buf));
+            }
         }
         for asset in &agent.assets {
             let parent = asset.path.parent();
@@ -81,13 +88,23 @@ pub fn watch_dirs(agents: &[Agent]) -> BTreeSet<PathBuf> {
                 dirs.extend(parent.and_then(Path::parent).map(Path::to_path_buf));
             }
         }
-        for project in &agent.known_projects {
+        let scoped = agent.assets.iter().filter_map(|a| match &a.scope {
+            Scope::Project { path } => Some(path),
+            _ => None,
+        });
+        for project in agent.known_projects.iter().chain(scoped) {
             dirs.insert(project.clone());
+            for sub in PROJECT_DIRS {
+                dirs.insert(project.join(sub));
+            }
         }
     }
     dirs.retain(|d| d.is_dir());
     dirs
 }
+
+/// Folders inside a project where agents keep files.
+const PROJECT_DIRS: [&str; 7] = [".claude", ".claude/skills", ".claude/agents", ".claude/commands", ".agents", ".agents/skills", ".codex/skills"];
 
 /// `dir` and its ancestors from the top down, stopping below `/`.
 pub(crate) fn ancestors_top_down(dir: &Path) -> Vec<PathBuf> {

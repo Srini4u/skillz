@@ -6,7 +6,7 @@ import Coverage from "./views/Coverage";
 import LoadOrder from "./views/LoadOrder";
 import Overview from "./views/Overview";
 import SearchResults from "./views/SearchResults";
-import { Agent, KIND_LABELS, KIND_ORDER, OpenItem, SearchHit } from "./types";
+import { Agent, KIND_LABELS, KIND_ORDER, OpenItem, SearchHit, openAsset } from "./types";
 
 type Tab = "overview" | "map" | "coverage" | "load";
 const TABS: { id: Tab; label: string }[] = [
@@ -67,6 +67,19 @@ export default function App() {
     const t = setTimeout(() => search(q).then(setHits).catch(() => setHits([])), 200);
     return () => clearTimeout(t);
   }, [query, agents]);
+
+  // After a rescan, swap the open item for its fresh copy so the viewer re-reads the file
+  // and an MCP server shows its new config.
+  useEffect(() => {
+    setOpen((o) => {
+      if (!o) return o;
+      for (const a of agents) {
+        const found = a.assets.find((x) => x.path === o.path && x.kind === o.kind && x.name === o.name);
+        if (found) return { ...openAsset(a, found), line: o.line };
+      }
+      return o.kind === "mcp_server" ? o : { ...o };
+    });
+  }, [agents]);
 
   const projects = useMemo(() => [...new Set([...extraProjects, ...agents.flatMap((a) => a.known_projects)])].sort(), [agents, extraProjects]);
 
