@@ -1,0 +1,18 @@
+[package]
+name = "skillz-core"
+description = "Discovers AI coding agents and their skills, instructions, memory, MCP servers and settings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "skillz-scan"
+path = "src/bin/skillz-scan.rs"
