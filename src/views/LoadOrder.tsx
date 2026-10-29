@@ -8,7 +8,8 @@ export default function LoadOrder({ agents, projects, onOpen, onChanged }: { age
   const [stacks, setStacks] = useState<LoadStack[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const inProject = (s: LoadStack) => s.files.filter((f) => f.kind === "instruction" && f.path.startsWith(`${project}/`));
+  // Project instructions, including ones inherited from a parent folder of the repo.
+  const inProject = (s: LoadStack) => s.files.filter((f) => f.kind === "instruction" && f.scope.type === "project");
   const fileFor = (id: string) => (id === "codex" ? "AGENTS.md" : "CLAUDE.md");
 
   /** Gives `target` a project instruction file: a copy of another agent's, or a blank one. */

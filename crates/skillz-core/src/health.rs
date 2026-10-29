@@ -1,7 +1,7 @@
 //! A checklist per agent of what makes it "well rounded", with a fix for each gap where one
 //! can be applied automatically.
 
-use crate::model::{Agent, AssetKind, Scope};
+use crate::model::{Agent, AssetKind, LoadedFile, Scope};
 use crate::sync::CopyRequest;
 use crate::util::which;
 use crate::{load_order, ScanContext};
@@ -69,11 +69,13 @@ fn check_agent(agent: &Agent, all: &[Agent], ctx: &ScanContext, projects: &BTree
     // Instructions in each project.
     for project in projects {
         let stacks = load_order(ctx, project);
-        let has = |id: &str| stacks.iter().find(|s| s.agent_id == id).is_some_and(|s| s.files.iter().any(|f| matches!(&f.scope, Scope::Project { .. }) && f.kind == AssetKind::Instruction));
+        // Project instructions, including ones inherited from a parent folder of the repo.
+        let project_file = |f: &&LoadedFile| matches!(&f.scope, Scope::Project { .. }) && f.kind == AssetKind::Instruction;
+        let has = |id: &str| stacks.iter().find(|s| s.agent_id == id).is_some_and(|s| s.files.iter().any(|f| project_file(&f)));
         let ok = has(&agent.id);
         let name = project.file_name().unwrap_or_default().to_string_lossy();
         let donor = others.iter().find(|o| has(&o.id)).and_then(|o| {
-            let file = stacks.iter().find(|s| s.agent_id == o.id)?.files.iter().rev().find(|f| f.kind == AssetKind::Instruction && f.path.starts_with(project))?.clone();
+            let file = stacks.iter().find(|s| s.agent_id == o.id)?.files.iter().rev().find(project_file)?.clone();
             Some((o, file))
         });
         let fix = match donor {
@@ -218,5 +220,23 @@ mod tests {
         assert!(get("codex", "parity").detail.contains("a"));
         let codex = report.iter().find(|h| h.agent_id == "codex").unwrap();
         assert_eq!(codex.score, 50, "5 of 10 checks fail");
+    }
+
+    #[test]
+    fn inherited_instructions_are_offered_as_the_donor() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+        let app = home.join("code/app");
+        fs::create_dir_all(&app).unwrap();
+        fs::write(home.join("code/CLAUDE.md"), "# shared rules").unwrap();
+        fs::create_dir_all(home.join(".claude")).unwrap();
+        fs::create_dir_all(home.join(".codex")).unwrap();
+        let ctx = ScanContext { home: home.clone(), codex_home: None, system_root: home.clone(), projects: vec![app.clone()], probe_binaries: false };
+        let report = health(&scan(&ctx), &ctx);
+        let check = |agent: &str| report.iter().find(|h| h.agent_id == agent).unwrap().checks.iter().find(|c| c.id.starts_with("project-instructions")).unwrap().clone();
+        assert!(check("claude-code").ok, "a parent folder's CLAUDE.md counts");
+        let codex = check("codex");
+        assert!(!codex.ok);
+        assert!(matches!(&codex.fix, Some(Fix::Copy { request }) if request.path == home.join("code/CLAUDE.md") && request.to_project.as_deref() == Some(app.as_path())));
     }
 }
