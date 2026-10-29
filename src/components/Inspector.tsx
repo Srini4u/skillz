@@ -27,6 +27,8 @@ export default function Inspector({ item, onClose, onChanged }: { item: OpenItem
   const [mode, setMode] = useState<Mode>("view");
   const [draft, setDraft] = useState("");
   const [draftName, setDraftName] = useState("");
+  // The MCP config the draft started from, so a save can tell if it changed on disk since.
+  const [opened, setOpened] = useState<unknown>(null);
   const [diff, setDiff] = useState<DiffLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -85,6 +87,7 @@ export default function Inspector({ item, onClose, onChanged }: { item: OpenItem
 
   const startEdit = () => {
     setDraft(original);
+    setOpened(item?.details ?? null);
     setMode("edit");
   };
 
@@ -104,7 +107,7 @@ export default function Inspector({ item, onClose, onChanged }: { item: OpenItem
   const save = async () => {
     const ok = await run(() =>
       isMcp
-        ? saveMcp(item.path, mcpProject(item), draftName.trim(), JSON.parse(draft), draftName.trim() !== item.name ? item.name : null)
+        ? saveMcp(item.path, mcpProject(item), draftName.trim(), JSON.parse(draft), draftName.trim() !== item.name ? item.name : null, opened)
         : saveFile(item.path, draft, file?.hash ?? null),
     );
     if (ok && isMcp && draftName.trim() !== item.name) return onClose();

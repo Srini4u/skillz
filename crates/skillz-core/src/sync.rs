@@ -74,7 +74,7 @@ pub fn copy_asset(store: &Store, ctx: &ScanContext, req: &CopyRequest) -> Result
             if read_server(&file, json_project(&file, req.to_project.as_deref()), &req.name).is_ok() {
                 return Err(EditError::Invalid(format!("{} already has an MCP server named {}", agent_name(&req.to_agent), req.name)));
             }
-            let mut e = ops::save_mcp_server(store, &file, json_project(&file, req.to_project.as_deref()), &req.name, translated, None)?;
+            let mut e = ops::save_mcp_server(store, &file, json_project(&file, req.to_project.as_deref()), &req.name, translated, None, None)?;
             e.summary = summary;
             Ok(e)
         }
