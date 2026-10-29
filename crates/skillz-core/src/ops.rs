@@ -73,11 +73,16 @@ pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name:
     if !config.is_object() {
         return Err(EditError::Invalid("an MCP server's config must be an object".into()));
     }
+    let taken = || EditError::Invalid(format!("there is already an MCP server named {name}"));
+    let renaming = rename_from.is_some_and(|from| from != name);
     let state = read_state(file)?;
     let content = if is_toml(file) {
         let mut doc: toml_edit::DocumentMut = state.content.parse().map_err(|e: toml_edit::TomlError| EditError::Invalid(e.to_string()))?;
         let servers = doc.entry("mcp_servers").or_insert(toml_edit::table()).as_table_mut().ok_or_else(|| EditError::Invalid("mcp_servers is not a table".into()))?;
         servers.set_implicit(true);
+        if renaming && servers.contains_key(name) {
+            return Err(taken());
+        }
         let old = servers.get(rename_from.unwrap_or(name)).map(|i| toml_to_json(i)).unwrap_or(Value::Null);
         let merged = unmask(config, &old);
         if let Some(from) = rename_from {
@@ -88,6 +93,9 @@ pub fn save_mcp_server(store: &Store, file: &Path, project: Option<&Path>, name:
     } else {
         let mut root: Value = if state.exists { serde_json::from_str(&state.content).map_err(|e| EditError::Invalid(e.to_string()))? } else { Value::Object(Default::default()) };
         let servers = servers_obj(&mut root, project)?;
+        if renaming && servers.contains_key(name) {
+            return Err(taken());
+        }
         let old = servers.get(rename_from.unwrap_or(name)).cloned().unwrap_or(Value::Null);
         let merged = unmask(config, &old);
         if let Some(from) = rename_from {
@@ -294,6 +302,14 @@ mod tests {
         save_mcp_server(&store, &file, Some(project), "db", serde_json::json!({"command": "pg"}), None).unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(v["projects"]["/work/repo"]["mcpServers"]["db"]["command"], "pg");
+
+        let before = fs::read_to_string(&file).unwrap();
+        save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "x"}), None).unwrap();
+        assert!(save_mcp_server(&store, &file, None, "linear", serde_json::json!({"command": "y"}), Some("github")).is_err(), "rename onto an existing server");
+        assert_ne!(before, fs::read_to_string(&file).unwrap());
+        let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(v["mcpServers"]["linear"]["command"], "x");
+        assert!(v["mcpServers"].get("github").is_some());
 
         delete_mcp_server(&store, &file, None, "github").unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();

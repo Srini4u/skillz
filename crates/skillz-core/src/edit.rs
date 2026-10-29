@@ -245,14 +245,21 @@ impl Store {
         let target = all[pos].clone();
         let time = now();
         let n = all.len();
-        let (path, backup) = match target.action {
+        let summary = format!("Undo: {}", target.summary);
+        let entry = match target.action {
+            // Undoing a rename is the inverse rename, recorded as one so it can be undone too.
             Action::Rename => {
                 let to = target.to.clone().unwrap_or_default();
                 if !to.exists() {
                     return Err(EditError::NotFound(to));
                 }
+                if target.path.exists() {
+                    return Err(EditError::Io(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", target.path.display()))));
+                }
                 fs::rename(&to, &target.path)?;
-                (target.path.clone(), None)
+                let mut e = self.entry(Action::Rename, &to, None, time, summary);
+                e.to = Some(target.path.clone());
+                e
             }
             _ => {
                 let backup = self.backup(&target.path, time, n)?;
@@ -260,13 +267,12 @@ impl Store {
                 if let Some(b) = &target.backup {
                     copy_all(b, &target.path)?;
                 }
-                (target.path.clone(), backup)
+                self.entry(Action::Undo, &target.path, backup, time, summary)
             }
         };
         all[pos].undone = true;
         atomic_write(&self.journal_path(), serde_json::to_string_pretty(&all).expect("journal serializes").as_bytes())?;
-        let summary = format!("Undo: {}", target.summary);
-        self.record(self.entry(Action::Undo, &path, backup, time, summary))
+        self.record(entry)
     }
 }
 
@@ -413,6 +419,10 @@ mod tests {
         assert!(b.exists() && !a.exists());
         store.undo(&e.id).unwrap();
         assert!(a.exists() && !b.exists());
+        // Undoing the undo renames it again rather than losing it.
+        let inverse = store.history()[0].clone();
+        store.undo(&inverse.id).unwrap();
+        assert!(b.exists() && !a.exists());
     }
 
     #[test]
