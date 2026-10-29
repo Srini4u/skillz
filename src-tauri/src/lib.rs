@@ -21,20 +21,40 @@ impl AppState {
     /// Only files that belong to an agent may be written: its config folders, and the
     /// projects it (or the user) pointed at. Skillz's own backups are never targets.
     fn check(&self, ctx: &ScanContext, path: &Path) -> Result<(), String> {
-        let path = normalize(path);
+        let outside = || format!("Skillz only changes agent files; {} is outside them", path.display());
+        if path.components().any(|c| c.as_os_str() == "..") {
+            return Err(outside());
+        }
         let codex = ctx.codex_home.clone().unwrap_or_else(|| ctx.home.join(".codex"));
         let mut allowed = vec![ctx.home.join(".claude"), ctx.home.join(".claude.json"), codex, ctx.home.join(".agents")];
         allowed.extend(self.projects.lock().unwrap().iter().cloned());
         allowed.extend(self.agents.lock().unwrap().iter().flat_map(|a| a.known_projects.iter().cloned()));
-        if path.components().any(|c| c.as_os_str() == "..") || !allowed.iter().any(|root| path.starts_with(root)) {
-            return Err(format!("Skillz only changes agent files; {} is outside them", path.display()));
+        // Compare real locations, so a symlink inside an allowed folder can't lead outside it.
+        let real = resolve(path);
+        if !allowed.iter().any(|root| real.starts_with(resolve(root))) {
+            return Err(outside());
         }
         Ok(())
     }
 }
 
-fn normalize(p: &Path) -> PathBuf {
-    p.canonicalize().unwrap_or_else(|_| p.to_path_buf())
+/// The real location of `p`: its deepest existing ancestor with symlinks resolved, plus
+/// the rest of the path, which does not exist yet.
+fn resolve(p: &Path) -> PathBuf {
+    let mut base = p.to_path_buf();
+    let mut rest = Vec::new();
+    while !base.exists() {
+        match (base.file_name().map(|n| n.to_os_string()), base.parent()) {
+            (Some(name), Some(parent)) => {
+                rest.push(name);
+                base = parent.to_path_buf();
+            }
+            _ => break,
+        }
+    }
+    let mut out = base.canonicalize().unwrap_or(base);
+    out.extend(rest.iter().rev());
+    out
 }
 
 fn ctx() -> ScanContext {
@@ -238,6 +258,13 @@ mod tests {
         for bad in [".bashrc", ".claude.json.bak", ".local/share/skillz/journal.json", "code/other/CLAUDE.md", "code/repo/../other/x.md"] {
             assert!(state.check(&ctx, &home.join(bad)).is_err(), "{bad}");
         }
+        // A symlink inside a project that points elsewhere is followed, then refused.
+        let outside = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::create_dir_all(home.join("code/repo")).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join("code/repo/link")).unwrap();
+        assert!(state.check(&ctx, &home.join("code/repo/link/new/SKILL.md")).is_err());
+        assert!(state.check(&ctx, &home.join("code/repo/real/new.md")).is_ok());
     }
 
     /// Calls commands the way the UI does (camelCase JSON args) against a temp home.
