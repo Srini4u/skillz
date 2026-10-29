@@ -79,19 +79,43 @@ header button, .add-project button { padding: 6px 14px; border: 1px solid var(--
 .snippet { display: block; font-family: ui-monospace, "Ubuntu Mono", monospace; font-size: 12px; color: var(--muted); margin-top: 2px; }
 .tag { font-size: 11px; opacity: 0.7; white-space: nowrap; margin-left: auto; }
 
-/* Map */
+/* Map: focus rings */
+.map { --k-skill: #3b6fd8; --k-subagent: #8a5cd0; --k-settings: #6b7785; --k-memory: #2e9a6b; --k-instruction: #c98a1b; --k-command: #d0566c; --k-mcp_server: #1e9bb0; }
+@media (prefers-color-scheme: dark) {
+  .map { --k-skill: #6e95ea; --k-subagent: #a985e4; --k-settings: #93a0ae; --k-memory: #4fbf8c; --k-instruction: #e0a640; --k-command: #e57a8c; --k-mcp_server: #43bdd0; }
+}
+.map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 4px 8px; border-bottom: 1px solid var(--line); }
+.crumbs { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; min-width: 0; }
+.crumbs button { border: none; background: none; color: var(--accent); padding: 2px 4px; border-radius: 4px; }
+.crumbs button:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.crumbs .sep { color: var(--muted); margin: 0 2px; }
+.crumbs .here { font-weight: 600; padding: 2px 4px; }
+.map-find { width: 200px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
 .map svg { width: 100%; height: auto; max-height: calc(100vh - 300px); display: block; }
+.map .ring { animation: ring-in 0.3s ease-out; transform-box: fill-box; transform-origin: center; }
+@keyframes ring-in { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .map .ring { animation: none; } }
 .map .edge { stroke: var(--line); stroke-width: 1.5; }
-.map .edge.thin { stroke-width: 1; }
 .map .agent-node { fill: var(--accent); }
-.map .agent-label { fill: #fff; font-weight: 600; font-size: 14px; }
-.map .group-node { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
-.map .group-label { fill: var(--text); font-weight: 700; font-size: 14px; }
-.map .group-sub { fill: var(--muted); font-size: 9.5px; }
-.map .leaf { cursor: pointer; }
-.map .leaf:hover .leaf-label { fill: var(--accent); }
-.map .leaf-label { fill: var(--text); font-size: 12px; }
+.map .center.up { cursor: pointer; }
+.map .center-label { fill: #fff; font-weight: 700; font-size: 15px; pointer-events: none; }
+.map .center-sub { fill: #fff; opacity: 0.85; font-size: 11.5px; pointer-events: none; }
+.map .node { cursor: pointer; outline: none; }
+.map .node:hover .body, .map .node:focus-visible .body { stroke: var(--text); stroke-width: 2; }
+.map .node.hit .body { stroke: var(--text); stroke-width: 3; }
+.map .node:hover text:not(.count) { font-weight: 600; }
+.map .slice { opacity: 0.5; }
+.map .count { fill: #fff; font-weight: 700; font-size: 12px; pointer-events: none; }
+.map .node-label { fill: var(--text); font-size: 14px; }
+.map .leaf-label { fill: var(--text); font-size: 13px; }
 .map .muted-fill { fill: var(--muted); }
+.map .fill-skill { fill: var(--k-skill); } .map .fill-subagent { fill: var(--k-subagent); } .map .fill-settings { fill: var(--k-settings); }
+.map .fill-memory { fill: var(--k-memory); } .map .fill-instruction { fill: var(--k-instruction); } .map .fill-command { fill: var(--k-command); }
+.map .fill-mcp_server { fill: var(--k-mcp_server); }
+.map .bg-skill { background: var(--k-skill); } .map .bg-subagent { background: var(--k-subagent); } .map .bg-settings { background: var(--k-settings); }
+.map .bg-memory { background: var(--k-memory); } .map .bg-instruction { background: var(--k-instruction); } .map .bg-command { background: var(--k-command); }
+.map .bg-mcp_server { background: var(--k-mcp_server); }
+.map .legend-sep { width: 1px; align-self: stretch; background: var(--line); }
 .map circle.scope-user { fill: var(--scope-user); }
 .map circle.scope-project { fill: var(--scope-project); }
 .map circle.scope-system { fill: var(--scope-system); }
