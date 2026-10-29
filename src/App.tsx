@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { inApp, onAgentsChanged, saveProjects, savedProjects, scanAgents, search } from "./api";
-import Viewer from "./components/Viewer";
+import { inApp, onAgentsChanged, saveProjects, savedProjects, scanAgents, search, undo } from "./api";
+import Inspector from "./components/Inspector";
+import NewAsset from "./components/NewAsset";
+import History from "./views/History";
+import HealthView from "./views/HealthView";
 import AgentMap from "./views/AgentMap";
 import Coverage from "./views/Coverage";
 import LoadOrder from "./views/LoadOrder";
 import Overview from "./views/Overview";
 import SearchResults from "./views/SearchResults";
-import { Agent, KIND_LABELS, KIND_ORDER, OpenItem, SearchHit, openAsset } from "./types";
+import { Agent, JournalEntry, KIND_LABELS, KIND_ORDER, OpenItem, SearchHit, openAsset } from "./types";
 
-type Tab = "overview" | "map" | "coverage" | "load";
+type Tab = "overview" | "map" | "coverage" | "load" | "health" | "history";
 const TABS: { id: Tab; label: string }[] = [
   { id: "map", label: "Map" },
   { id: "overview", label: "List" },
   { id: "coverage", label: "Coverage" },
   { id: "load", label: "Load order" },
+  { id: "health", label: "Health" },
+  { id: "history", label: "History" },
 ];
 
 export default function App() {
@@ -27,6 +32,10 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [changedAt, setChangedAt] = useState<Date | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; entries: JournalEntry[] } | null>(null);
+  const [version, setVersion] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!inApp()) {
@@ -68,9 +77,21 @@ export default function App() {
     return () => clearTimeout(t);
   }, [query, agents]);
 
-  // After a rescan, swap the open item for its fresh copy so the viewer re-reads the file
-  // and an MCP server shows its new config.
+  // After a rescan, swap the open item for its fresh copy so the inspector re-reads the
+  // file and shows the new enabled flag or MCP config; open something just created once
+  // the scan has picked it up.
   useEffect(() => {
+    if (pendingPath) {
+      for (const a of agents) {
+        const found = a.assets.find((x) => x.path === pendingPath);
+        if (found) {
+          setOpen(openAsset(a, found));
+          setPendingPath(null);
+          return;
+        }
+      }
+      return;
+    }
     setOpen((o) => {
       if (!o) return o;
       for (const a of agents) {
@@ -79,7 +100,30 @@ export default function App() {
       }
       return o.kind === "mcp_server" ? o : { ...o };
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents]);
+
+  const changed = (entries: JournalEntry[]) => {
+    if (entries.length === 0) return;
+    setToast({ text: entries[entries.length - 1].summary, entries });
+    setVersion((v) => v + 1);
+    refresh();
+  };
+
+  const undoToast = async () => {
+    if (!toast) return;
+    const done: JournalEntry[] = [];
+    for (const e of [...toast.entries].reverse()) done.push(await undo(e.id));
+    setToast({ text: "Undone", entries: [] });
+    setVersion((v) => v + 1);
+    refresh();
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 8000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const projects = useMemo(() => [...new Set([...extraProjects, ...agents.flatMap((a) => a.known_projects)])].sort(), [agents, extraProjects]);
 
@@ -131,18 +175,48 @@ export default function App() {
           ) : tab === "map" ? (
             agent && <AgentMap agent={agent} onOpen={setOpen} />
           ) : tab === "overview" ? (
-            agent && <Overview agent={agent} open={open} onOpen={setOpen} />
+            agent && (
+              <>
+                {creating ? (
+                  <NewAsset
+                    agent={agent}
+                    projects={projects}
+                    onCancel={() => setCreating(false)}
+                    onCreated={(e) => {
+                      setCreating(false);
+                      setPendingPath(e.path);
+                      changed([e]);
+                    }}
+                  />
+                ) : (
+                  <button className="new-btn" onClick={() => setCreating(true)} disabled={!agent.installed}>
+                    + New skill, instruction, memory, MCP server…
+                  </button>
+                )}
+                <Overview agent={agent} open={open} onOpen={setOpen} />
+              </>
+            )
+          ) : tab === "health" ? (
+            <HealthView agents={agents} version={version} onOpen={setOpen} onChanged={changed} onCoverage={() => setTab("coverage")} />
+          ) : tab === "history" ? (
+            <History version={version} onChanged={changed} />
           ) : tab === "coverage" ? (
-            <Coverage agents={agents} onOpen={setOpen} />
+            <Coverage agents={agents} onOpen={setOpen} onChanged={changed} />
           ) : (
             <>
               <AddProject onAdd={addProject} />
-              <LoadOrder agents={agents} projects={projects} onOpen={setOpen} />
+              <LoadOrder agents={agents} projects={projects} onOpen={setOpen} onChanged={changed} />
             </>
           )}
         </div>
-        <Viewer item={open} onClose={() => setOpen(null)} />
+        <Inspector item={open} onClose={() => setOpen(null)} onChanged={changed} />
       </main>
+      {toast && (
+        <div className="toast" role="status">
+          {toast.text}
+          {toast.entries.length > 0 && <button onClick={undoToast}>Undo</button>}
+        </div>
+      )}
     </div>
   );
 }

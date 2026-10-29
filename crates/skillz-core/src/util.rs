@@ -100,6 +100,9 @@ pub fn version_of(bin: &Path) -> Option<String> {
     text.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
 }
 
+/// What secret values are replaced with before they reach the UI.
+pub const MASK: &str = "••••••";
+
 const SECRET_HINTS: [&str; 6] = ["key", "token", "secret", "password", "auth", "credential"];
 
 /// Replaces every env value, and any header or arg that looks like a secret, with a mask.
@@ -110,7 +113,7 @@ pub fn mask_secrets(server: &mut serde_json::Value) {
         if let Some(Value::Object(map)) = obj.get_mut(field) {
             for (k, v) in map.iter_mut() {
                 if field == "env" || SECRET_HINTS.iter().any(|h| k.to_lowercase().contains(h)) {
-                    *v = Value::String("••••••".into());
+                    *v = Value::String(MASK.into());
                 }
             }
         }

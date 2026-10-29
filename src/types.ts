@@ -63,19 +63,65 @@ export interface SearchHit {
   snippet: string;
 }
 
-/** Anything the viewer can show: an asset, or a file from a load stack. */
+/** Anything the inspector can show: an asset, or a file from a load stack. */
 export interface OpenItem {
+  agentId: string;
   agentName: string;
   name: string;
   kind: AssetKind;
   path: string;
+  scope?: Scope;
+  enabled?: boolean;
   description?: string | null;
   details?: unknown;
   line?: number | null;
 }
 
 export function openAsset(agent: Agent, a: Asset, line?: number | null): OpenItem {
-  return { agentName: agent.name, name: a.name, kind: a.kind, path: a.path, description: a.description, details: a.details, line };
+  return { agentId: agent.id, agentName: agent.name, name: a.name, kind: a.kind, path: a.path, scope: a.scope, enabled: a.enabled, description: a.description, details: a.details, line };
+}
+
+export interface FileState {
+  content: string;
+  hash: string;
+  exists: boolean;
+}
+
+export interface DiffLine {
+  tag: "same" | "add" | "remove";
+  text: string;
+}
+
+export interface JournalEntry {
+  id: string;
+  time: number;
+  action: "create" | "write" | "delete" | "rename" | "undo";
+  path: string;
+  to: string | null;
+  backup: string | null;
+  summary: string;
+  undone: boolean;
+}
+
+/** Kinds each agent can create, and whether they can live at user level and in a project. */
+export const CREATABLE: Record<string, { kind: AssetKind; user: boolean; project: boolean }[]> = {
+  "claude-code": [
+    { kind: "skill", user: true, project: true },
+    { kind: "instruction", user: true, project: true },
+    { kind: "memory", user: false, project: true },
+    { kind: "subagent", user: true, project: true },
+    { kind: "command", user: true, project: true },
+  ],
+  codex: [
+    { kind: "skill", user: true, project: true },
+    { kind: "instruction", user: true, project: true },
+    { kind: "command", user: true, project: false },
+  ],
+};
+
+/** The `project` argument for an MCP server stored per project inside ~/.claude.json. */
+export function mcpProject(item: OpenItem): string | null {
+  return item.path.endsWith("/.claude.json") && item.scope?.type === "project" ? item.scope.path : null;
 }
 
 export function fileName(path: string): string {
@@ -85,3 +131,39 @@ export function fileName(path: string): string {
 export function formatBytes(n: number): string {
   return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
 }
+
+export interface CopyRequest {
+  fromAgent: string;
+  kind: AssetKind;
+  name: string;
+  path: string;
+  project: string | null;
+  toAgent: string;
+  toProject: string | null;
+}
+
+export type Fix =
+  | { type: "create"; agent_id: string; kind: AssetKind; project: string | null }
+  | { type: "copy"; request: CopyRequest }
+  | { type: "open"; path: string }
+  | { type: "coverage" };
+
+export interface Check {
+  id: string;
+  ok: boolean;
+  severity: "warn" | "info";
+  title: string;
+  detail: string;
+  fix: Fix | null;
+}
+
+export interface Health {
+  agent_id: string;
+  score: number;
+  checks: Check[];
+}
+
+/** Kinds that can be copied from one agent to another. */
+export const COPYABLE: AssetKind[] = ["skill", "mcp_server", "command", "subagent", "instruction"];
+
+export const agentLabel = (id: string) => (id === "claude-code" ? "Claude Code" : id === "codex" ? "Codex" : id);
