@@ -12,7 +12,9 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    # Build on the oldest Ubuntu LTS we support: the bundles link against its glibc and
+    # WebKitGTK, so they also run on newer releases but not on older ones.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Tauri system libraries

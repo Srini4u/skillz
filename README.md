@@ -6,7 +6,7 @@ Skillz reads and writes the agents' own files (`~/.claude`, `~/.claude.json`, `~
 
 **Status:** Phase 3. The app scans Claude Code and Codex CLI, shows what each has, lets you change it, and helps you bring both up to the same level.
 
-## Install (Ubuntu)
+## Install (Ubuntu 22.04 or newer)
 
 Download the AppImage or .deb from [Releases](https://github.com/Srini4u/skillz/releases), then either:
 
@@ -16,7 +16,7 @@ chmod +x Skillz_*.AppImage && ./Skillz_*.AppImage
 sudo apt install ./Skillz_*.deb
 ```
 
-Every push to `main` also builds both, as the `skillz-linux` artifact of its CI run. To publish a release, push a version tag: `git tag v0.1.0 && git push origin v0.1.0`.
+Every push to `main` also builds both, as the `skillz-linux` artifact of its CI run. To publish a release, push a version tag: `git tag v0.1.1 && git push origin v0.1.1` (the tag should match the version in `src-tauri/tauri.conf.json`).
 
 Views:
 
