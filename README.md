@@ -6,6 +6,18 @@ Skillz reads and writes the agents' own files (`~/.claude`, `~/.claude.json`, `~
 
 **Status:** Phase 3. The app scans Claude Code and Codex CLI, shows what each has, lets you change it, and helps you bring both up to the same level.
 
+## Install (Ubuntu)
+
+Download the AppImage or .deb from [Releases](https://github.com/Srini4u/skillz/releases), then either:
+
+```sh
+chmod +x Skillz_*.AppImage && ./Skillz_*.AppImage
+# or
+sudo apt install ./Skillz_*.deb
+```
+
+Every push to `main` also builds both, as the `skillz-linux` artifact of its CI run. To publish a release, push a version tag: `git tag v0.1.0 && git push origin v0.1.0`.
+
 Views:
 
 - **Map:** each agent in the middle with its instructions, memory, skills, MCP servers, subagents, commands and settings around it, coloured by scope. Click a dot to open its file.
