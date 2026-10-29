@@ -1,11 +1,29 @@
 import { useEffect, useState } from "react";
-import { loadOrder } from "../api";
-import { Agent, LoadStack, OpenItem, fileName, formatBytes } from "../types";
+import { copyAsset, createAsset, loadOrder } from "../api";
+import { Agent, JournalEntry, LoadStack, OpenItem, agentLabel, fileName, formatBytes } from "../types";
 
 /** For one repo: the files each agent reads into context at startup, top to bottom. */
-export default function LoadOrder({ agents, projects, onOpen }: { agents: Agent[]; projects: string[]; onOpen: (i: OpenItem) => void }) {
+export default function LoadOrder({ agents, projects, onOpen, onChanged }: { agents: Agent[]; projects: string[]; onOpen: (i: OpenItem) => void; onChanged: (e: JournalEntry[]) => void }) {
   const [project, setProject] = useState(projects[0] ?? "");
   const [stacks, setStacks] = useState<LoadStack[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const inProject = (s: LoadStack) => s.files.filter((f) => f.kind === "instruction" && f.path.startsWith(`${project}/`));
+  const fileFor = (id: string) => (id === "codex" ? "AGENTS.md" : "CLAUDE.md");
+
+  /** Gives `target` a project instruction file: a copy of another agent's, or a blank one. */
+  const scaffold = async (target: string, donor: LoadStack | undefined) => {
+    setError(null);
+    try {
+      const src = donor && inProject(donor).at(-1);
+      const e = src
+        ? await copyAsset({ fromAgent: donor.agent_id, kind: "instruction", name: fileName(src.path), path: src.path, project, toAgent: target, toProject: project })
+        : await createAsset(target, "instruction", project, target === "codex" ? "AGENTS" : "CLAUDE", "");
+      onChanged([e]);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   useEffect(() => {
     if (!project && projects[0]) setProject(projects[0]);
@@ -31,6 +49,7 @@ export default function LoadOrder({ agents, projects, onOpen }: { agents: Agent[
           ))}
         </select>
       </label>
+      {error && <p className="error">{error}</p>}
       <div className="stacks">
         {stacks.map((s) => {
           const agent = agents.find((a) => a.id === s.agent_id);
@@ -41,7 +60,18 @@ export default function LoadOrder({ agents, projects, onOpen }: { agents: Agent[
               <p className="muted">
                 {s.files.length} files · {formatBytes(total)} · about {Math.round(total / 4).toLocaleString()} tokens
               </p>
-              {s.files.length === 0 && <p className="warn">Loads no instructions in this project.</p>}
+              {inProject(s).length === 0 &&
+                (() => {
+                  const donor = stacks.find((o) => o.agent_id !== s.agent_id && inProject(o).length > 0);
+                  return (
+                    <div className="scaffold">
+                      <p className="warn">No {fileFor(s.agent_id)} in this project, so it doesn't know this repo's rules.</p>
+                      <button onClick={() => scaffold(s.agent_id, donor)}>
+                        {donor ? `Create ${fileFor(s.agent_id)} from ${agentLabel(donor.agent_id)}'s ${fileName(inProject(donor).at(-1)!.path)}` : `Create ${fileFor(s.agent_id)}`}
+                      </button>
+                    </div>
+                  );
+                })()}
               <ol>
                 {s.files.map((f) => (
                   <li key={f.path}>

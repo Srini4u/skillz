@@ -1,7 +1,9 @@
 use notify_debouncer_mini::notify::RecursiveMode;
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
 use skillz_core::edit::{DiffLine, FileState, JournalEntry, Store};
-use skillz_core::{ops, Agent, AssetKind, LoadStack, ScanContext, SearchHit};
+use skillz_core::health::Health;
+use skillz_core::sync::CopyRequest;
+use skillz_core::{ops, sync, Agent, AssetKind, LoadStack, ScanContext, SearchHit};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -148,6 +150,30 @@ fn rename_skill(state: State<'_, AppState>, path: String, new_name: String) -> R
     ops::rename_skill(&store(), &path, &new_name).map_err(err)
 }
 
+/// Copies a skill, command, subagent, instruction file or MCP server to another agent.
+#[tauri::command]
+fn copy_asset(state: State<'_, AppState>, request: CopyRequest) -> Result<JournalEntry, String> {
+    let ctx = ctx();
+    if let Some(p) = &request.to_project {
+        state.check(&ctx, &p.join("CLAUDE.md"))?;
+    }
+    sync::copy_asset(&store(), &ctx, &request).map_err(err)
+}
+
+/// Where a copy lands by default: the source's project when the target keeps that kind per
+/// project, else user level (`None`).
+#[tauri::command]
+fn copy_target(to_agent: String, kind: AssetKind, project: Option<String>, name: String) -> Option<PathBuf> {
+    sync::default_target(&ctx(), &to_agent, kind, project.as_deref().map(Path::new), &name)
+}
+
+/// The well-rounded checklist for each installed agent, from the last scan.
+#[tauri::command]
+fn health(state: State<'_, AppState>) -> Vec<Health> {
+    let ctx = ScanContext::from_env(state.projects.lock().unwrap().clone());
+    skillz_core::health::health(&state.agents.lock().unwrap(), &ctx)
+}
+
 #[tauri::command]
 fn history() -> Vec<JournalEntry> {
     store().history()
@@ -211,6 +237,9 @@ fn with_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builde
             delete_mcp,
             set_enabled,
             rename_skill,
+            copy_asset,
+            copy_target,
+            health,
             history,
             undo
         ])
@@ -294,6 +323,19 @@ mod tests {
         let newest = hist[0]["id"].as_str().unwrap().to_string();
         call("undo", json!({"id": newest})).unwrap();
         assert!(std::fs::read_to_string(home.join(".claude/skills/tests/SKILL.md")).unwrap().contains("name: write-tests"));
+        // Phase 3: copy the skill to Codex, then read the health report.
+        call("scan_agents", json!({"projects": []})).unwrap();
+        let skill_now = home.join(".claude/skills/tests/SKILL.md");
+        let target = call("copy_target", json!({"toAgent": "codex", "kind": "skill", "project": null, "name": "tests"})).unwrap();
+        assert!(target.is_null());
+        let req = json!({"fromAgent": "claude-code", "kind": "skill", "name": "tests", "path": skill_now, "project": null, "toAgent": "codex", "toProject": null});
+        call("copy_asset", json!({"request": req})).unwrap();
+        assert!(home.join(".agents/skills/tests/SKILL.md").exists());
+        let bad = json!({"fromAgent": "claude-code", "kind": "instruction", "name": "x", "path": skill_now, "project": null, "toAgent": "codex", "toProject": "/etc"});
+        assert!(call("copy_asset", json!({"request": bad})).is_err(), "copies only into known projects");
+        let report = call("health", json!({})).unwrap();
+        assert!(report.as_array().unwrap().iter().all(|h| h["score"].as_u64().unwrap() <= 100));
+
         let diff = call("diff_text", json!({"old": "a\n", "new": "b\n"})).unwrap();
         assert_eq!(diff[0]["tag"], "remove");
     }

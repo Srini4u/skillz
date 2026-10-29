@@ -154,3 +154,31 @@ button.ghost-danger { color: var(--gap); }
 .history .entry .small { word-break: break-all; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-radius: 10px; background: var(--text); color: var(--bg); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2); }
 .toast button { background: transparent; color: var(--bg); border-color: var(--muted); }
+
+/* Well rounded */
+.copy-btn { padding: 2px 8px; border: 1px solid var(--gap); border-radius: 5px; background: var(--panel); color: var(--gap); font-size: 12px; }
+.copy-btn:hover { background: var(--gap); color: #fff; }
+.scaffold { margin-bottom: 8px; }
+.scaffold p { margin: 0 0 6px; }
+.scaffold button { padding: 4px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); color: var(--accent); font-size: 12.5px; }
+.health > p { margin-top: 0; }
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.health-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.score-row { display: flex; justify-content: space-between; align-items: center; }
+.score-row h3 { margin: 0; font-size: 15px; }
+.score { font-size: 26px; font-weight: 700; }
+.score.good { color: var(--have); }
+.score.mid { color: var(--warn); }
+.score.low { color: var(--gap); }
+.meter { height: 6px; border-radius: 3px; background: var(--line); margin: 6px 0 10px; overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--accent); }
+.checks { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: start; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.checks li:last-child { border-bottom: none; }
+.checks .mark { font-weight: 700; text-align: center; }
+.checks li.ok .mark { color: var(--have); }
+.checks li.sev-warn .mark { color: var(--gap); }
+.checks li.sev-info .mark { color: var(--warn); }
+.checks li.ok > div:nth-child(2) > div:first-child { color: var(--muted); }
+.checks button { padding: 3px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: 12px; white-space: nowrap; }
+.checks .small { word-break: break-word; }

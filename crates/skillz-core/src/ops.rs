@@ -177,7 +177,7 @@ pub fn rename_skill(store: &Store, skill_file: &Path, new_name: &str) -> Result<
     Ok(entries)
 }
 
-fn servers_obj<'a>(root: &'a mut Value, project: Option<&Path>) -> Result<&'a mut serde_json::Map<String, Value>> {
+pub(crate) fn servers_obj<'a>(root: &'a mut Value, project: Option<&Path>) -> Result<&'a mut serde_json::Map<String, Value>> {
     let bad = || EditError::Invalid("unexpected shape in the JSON file".into());
     let mut node = root.as_object_mut().ok_or_else(bad)?;
     if let Some(p) = project {
@@ -211,7 +211,7 @@ fn json_to_toml_table(v: &Value) -> Result<toml_edit::Table> {
     Ok(doc.as_table().clone())
 }
 
-fn toml_to_json(item: &toml_edit::Item) -> Value {
+pub(crate) fn toml_to_json(item: &toml_edit::Item) -> Value {
     let text = match item.as_table_like() {
         Some(_) => {
             let mut doc = toml_edit::DocumentMut::new();
@@ -229,7 +229,7 @@ fn pretty_json(v: &Value) -> String {
     s
 }
 
-fn is_toml(p: &Path) -> bool {
+pub(crate) fn is_toml(p: &Path) -> bool {
     p.extension().is_some_and(|e| e == "toml")
 }
 

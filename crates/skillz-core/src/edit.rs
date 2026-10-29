@@ -205,6 +205,18 @@ impl Store {
         self.record(self.entry(Action::Delete, path, backup, time, summary.to_string()))
     }
 
+    /// Copies a file or folder (a skill with its scripts) to `to`. Refuses to overwrite.
+    pub fn copy_in(&self, from: &Path, to: &Path, summary: &str) -> Result<JournalEntry> {
+        if !from.exists() {
+            return Err(EditError::NotFound(from.to_path_buf()));
+        }
+        if to.exists() {
+            return Err(EditError::Io(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} already exists", to.display()))));
+        }
+        copy_all(from, to)?;
+        self.record(self.entry(Action::Create, to, None, now(), summary.to_string()))
+    }
+
     /// Moves a file or folder. Refuses to overwrite.
     pub fn rename(&self, from: &Path, to: &Path, summary: &str) -> Result<JournalEntry> {
         if !from.exists() {
@@ -372,6 +384,22 @@ mod tests {
         assert!(!dir.exists());
         store.undo(&e.id).unwrap();
         assert_eq!(fs::read_to_string(dir.join("scripts/run.sh")).unwrap(), "echo");
+    }
+
+    #[test]
+    fn copy_folder_then_undo_removes_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = Store::new(tmp.path().join("store"));
+        let src = tmp.path().join("a/pdf");
+        fs::create_dir_all(src.join("scripts")).unwrap();
+        fs::write(src.join("SKILL.md"), "s").unwrap();
+        fs::write(src.join("scripts/x.sh"), "x").unwrap();
+        let dest = tmp.path().join("b/pdf");
+        let e = store.copy_in(&src, &dest, "copy").unwrap();
+        assert_eq!(fs::read_to_string(dest.join("scripts/x.sh")).unwrap(), "x");
+        assert!(store.copy_in(&src, &dest, "again").is_err());
+        store.undo(&e.id).unwrap();
+        assert!(!dest.exists() && src.exists());
     }
 
     #[test]
