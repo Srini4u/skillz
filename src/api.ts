@@ -43,8 +43,9 @@ export const saveFile = (path: string, content: string, hash: string | null) => 
 export const deletePath = (path: string, hash: string | null) => invoke<JournalEntry>("delete_path", { path, hash });
 export const createAsset = (agentId: string, kind: AssetKind, project: string | null, name: string, description: string) =>
   invoke<JournalEntry>("create_asset", { agentId, kind, project, name, description });
-export const saveMcp = (file: string, project: string | null, name: string, config: unknown, renameFrom: string | null) =>
-  invoke<JournalEntry>("save_mcp", { file, project, name, config, renameFrom });
+/** `opened` is the server's config as the draft started from it, or null for a new server. */
+export const saveMcp = (file: string, project: string | null, name: string, config: unknown, renameFrom: string | null, opened: unknown) =>
+  invoke<JournalEntry>("save_mcp", { file, project, name, config, renameFrom, opened });
 export const deleteMcp = (file: string, project: string | null, name: string) => invoke<JournalEntry>("delete_mcp", { file, project, name });
 export const setEnabled = (agentId: string, kind: AssetKind, path: string, name: string, enabled: boolean) =>
   invoke<JournalEntry>("set_enabled", { agentId, kind, path, name, enabled });

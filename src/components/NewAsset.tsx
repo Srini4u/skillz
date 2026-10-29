@@ -29,7 +29,7 @@ export default function NewAsset({ agent, projects, onCreated, onCancel }: { age
         const config = cmd.startsWith("http") ? { type: "http", url: cmd } : { command: cmd, args };
         const home = agent.roots.find((r) => r.endsWith(".claude.json") || r.endsWith(".codex"));
         const file = agent.id === "codex" ? `${home}/config.toml` : project ? `${project}/.mcp.json` : home!;
-        onCreated(await saveMcp(file, null, name, config, null), "mcp_server");
+        onCreated(await saveMcp(file, null, name, config, null, null), "mcp_server");
       } else {
         onCreated(await createAsset(agent.id, kind, project, needsName ? name : kind === "instruction" ? (agent.id === "codex" ? "AGENTS" : "CLAUDE") : name, description), kind);
       }
