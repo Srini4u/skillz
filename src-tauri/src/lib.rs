@@ -5,7 +5,7 @@ use skillz_core::{ops, Agent, AssetKind, LoadStack, ScanContext, SearchHit};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 type Watcher = Debouncer<notify_debouncer_mini::notify::RecommendedWatcher>;
 
@@ -51,7 +51,7 @@ fn err(e: impl std::fmt::Display) -> String {
 
 /// Scans every supported agent and re-arms the file watcher on what was found.
 #[tauri::command]
-async fn scan_agents(app: AppHandle, state: State<'_, AppState>, projects: Vec<String>) -> Result<Vec<Agent>, String> {
+async fn scan_agents<R: tauri::Runtime>(app: AppHandle<R>, state: State<'_, AppState>, projects: Vec<String>) -> Result<Vec<Agent>, String> {
     let projects: Vec<PathBuf> = projects.into_iter().map(PathBuf::from).collect();
     let ctx = ScanContext::from_env(projects.clone());
     let agents = skillz_core::scan(&ctx);
@@ -171,7 +171,7 @@ fn file_label(p: &Path) -> String {
 
 /// Watches the folders the agents' files live in and emits `agents-changed` when one of
 /// them changes. Session logs and other churn under ~/.claude/projects are ignored.
-fn watch(app: &AppHandle, state: &AppState, agents: &[Agent], home: &Path) {
+fn watch<R: tauri::Runtime>(app: &AppHandle<R>, state: &AppState, agents: &[Agent], home: &Path) {
     let noise = home.join(".claude").join("projects");
     let handle = app.clone();
     let debouncer = new_debouncer(Duration::from_millis(800), move |res: DebounceEventResult| {
@@ -194,13 +194,10 @@ fn watch(app: &AppHandle, state: &AppState, agents: &[Agent], home: &Path) {
     *state.watcher.lock().unwrap() = Some(debouncer);
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .setup(|app| {
-            app.manage(AppState::default());
-            Ok(())
-        })
+/// Registers state and commands; shared by the app and the IPC tests.
+fn with_commands<R: tauri::Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             scan_agents,
             load_order,
@@ -217,8 +214,11 @@ pub fn run() {
             history,
             undo
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Skillz");
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    with_commands(tauri::Builder::default()).run(tauri::generate_context!()).expect("error while running Skillz");
 }
 
 #[cfg(test)]
@@ -238,5 +238,63 @@ mod tests {
         for bad in [".bashrc", ".claude.json.bak", ".local/share/skillz/journal.json", "code/other/CLAUDE.md", "code/repo/../other/x.md"] {
             assert!(state.check(&ctx, &home.join(bad)).is_err(), "{bad}");
         }
+    }
+
+    /// Calls commands the way the UI does (camelCase JSON args) against a temp home.
+    #[test]
+    fn ui_calls_reach_the_commands() {
+        use serde_json::{json, Value};
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().to_path_buf();
+        std::env::set_var("HOME", &home);
+        std::env::set_var("XDG_DATA_HOME", home.join(".local/share"));
+        std::env::remove_var("CODEX_HOME");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex/config.toml"), "# mine\nmodel = \"gpt-5\"\n").unwrap();
+
+        let app = with_commands(tauri::test::mock_builder()).build(tauri::generate_context!(test = true)).unwrap();
+        let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
+        let call = |cmd: &str, body: Value| -> Result<Value, Value> {
+            tauri::test::get_ipc_response(
+                &webview,
+                tauri::webview::InvokeRequest {
+                    cmd: cmd.into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: "tauri://localhost".parse().unwrap(),
+                    body: tauri::ipc::InvokeBody::Json(body),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
+                },
+            )
+            .map(|b| b.deserialize::<Value>().unwrap())
+        };
+
+        call("scan_agents", json!({"projects": []})).unwrap();
+        let created = call("create_asset", json!({"agentId": "claude-code", "kind": "skill", "project": null, "name": "Write Tests", "description": "Add tests"})).unwrap();
+        let skill = home.join(".claude/skills/write-tests/SKILL.md");
+        assert_eq!(created["path"], json!(skill));
+
+        let state = call("read_file", json!({"path": skill})).unwrap();
+        let saved = call("save_file", json!({"path": skill, "content": "---\nname: write-tests\n---\nnew body\n", "hash": state["hash"]})).unwrap();
+        assert_eq!(saved["action"], "write");
+        assert!(call("save_file", json!({"path": skill, "content": "x", "hash": state["hash"]})).is_err(), "stale hash must be refused");
+
+        call("save_mcp", json!({"file": home.join(".codex/config.toml"), "project": null, "name": "github", "config": {"command": "npx"}, "renameFrom": null})).unwrap();
+        call("set_enabled", json!({"agentId": "codex", "kind": "mcp_server", "path": home.join(".codex/config.toml"), "name": "github", "enabled": false})).unwrap();
+        let toml = std::fs::read_to_string(home.join(".codex/config.toml")).unwrap();
+        assert!(toml.starts_with("# mine") && toml.contains("enabled = false"), "{toml}");
+
+        let renamed = call("rename_skill", json!({"path": skill, "newName": "tests"})).unwrap();
+        assert_eq!(renamed.as_array().unwrap().len(), 2);
+        assert!(call("save_file", json!({"path": home.join(".bashrc"), "content": "x", "hash": null})).is_err());
+
+        let hist = call("history", json!({})).unwrap();
+        let newest = hist[0]["id"].as_str().unwrap().to_string();
+        call("undo", json!({"id": newest})).unwrap();
+        assert!(std::fs::read_to_string(home.join(".claude/skills/tests/SKILL.md")).unwrap().contains("name: write-tests"));
+        let diff = call("diff_text", json!({"old": "a\n", "new": "b\n"})).unwrap();
+        assert_eq!(diff[0]["tag"], "remove");
     }
 }

@@ -35,12 +35,24 @@ export default function Inspector({ item, onClose, onChanged }: { item: OpenItem
 
   const original = useMemo(() => (isMcp ? JSON.stringify(item?.details ?? {}, null, 2) : (file?.content ?? "")), [isMcp, item, file]);
 
+  const identity = item ? `${item.agentId}|${item.kind}|${item.path}|${item.name}` : "";
+  const editing = useRef(false);
+  editing.current = mode !== "view";
+
+  // A different item: start over in view mode.
   useEffect(() => {
     setMode("view");
     setError(null);
     setConfirmDelete(false);
     setDraftName(item?.name ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity]);
+
+  // Same item refreshed from disk: re-read it, unless a draft is open. Saving a draft
+  // that went stale is refused by the hash check, so nothing is overwritten.
+  useEffect(() => {
     if (!item || isMcp) return setFile(null);
+    if (editing.current) return;
     let live = true;
     readFile(item.path)
       .then((f) => live && setFile(f))

@@ -21,3 +21,4 @@ notify-debouncer-mini = "0.7.0"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+tauri = { version = "2", features = ["test"] }

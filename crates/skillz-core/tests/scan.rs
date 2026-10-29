@@ -159,3 +159,18 @@ fn search_matches_content_and_names() {
     let skill = &agents[0].assets[hits[0].asset];
     assert_eq!(skill.bytes, Some(skill_text.len() as u64));
 }
+
+#[test]
+fn empty_asset_folders_are_watched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(tmp.path().join(".claude/commands")).unwrap();
+    fs::create_dir_all(repo.join(".claude/skills")).unwrap();
+    let state = serde_json::json!({"projects": {repo.to_string_lossy(): {}}});
+    write(&tmp.path().join(".claude.json"), &state.to_string());
+    let ctx = ScanContext { home: tmp.path().into(), codex_home: None, system_root: tmp.path().into(), projects: vec![], probe_binaries: false };
+    let dirs = skillz_core::watch_dirs(&scan(&ctx));
+    assert!(dirs.contains(&tmp.path().join(".claude/commands")));
+    assert!(dirs.contains(&repo.join(".claude/skills")));
+    assert!(dirs.iter().all(|d| d.is_dir()));
+}

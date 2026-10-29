@@ -75,19 +75,29 @@ export default function App() {
     return () => clearTimeout(t);
   }, [query, agents]);
 
-  // Keep the open item in step with disk after a rescan (enabled flag, details), and open
-  // something just created once the scan has picked it up.
+  // After a rescan, swap the open item for its fresh copy so the inspector re-reads the
+  // file and shows the new enabled flag or MCP config; open something just created once
+  // the scan has picked it up.
   useEffect(() => {
-    const want = pendingPath ?? open?.path;
-    if (!want) return;
-    for (const a of agents) {
-      const found = a.assets.find((x) => x.path === want && (pendingPath || (x.kind === open?.kind && x.name === open?.name)));
-      if (found) {
-        setOpen((o) => (pendingPath || o ? { ...openAsset(a, found), line: pendingPath ? null : o?.line } : o));
-        if (pendingPath) setPendingPath(null);
-        return;
+    if (pendingPath) {
+      for (const a of agents) {
+        const found = a.assets.find((x) => x.path === pendingPath);
+        if (found) {
+          setOpen(openAsset(a, found));
+          setPendingPath(null);
+          return;
+        }
       }
+      return;
     }
+    setOpen((o) => {
+      if (!o) return o;
+      for (const a of agents) {
+        const found = a.assets.find((x) => x.path === o.path && x.kind === o.kind && x.name === o.name);
+        if (found) return { ...openAsset(a, found), line: o.line };
+      }
+      return o.kind === "mcp_server" ? o : { ...o };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents]);
 
